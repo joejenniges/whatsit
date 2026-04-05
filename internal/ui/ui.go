@@ -1,0 +1,138 @@
+package ui
+
+import (
+	"time"
+
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
+
+	"github.com/joe/radio-transcriber/internal/config"
+	"github.com/joe/radio-transcriber/internal/storage"
+)
+
+// App is the main UI application. It owns the Fyne app, window, and all
+// screens. The orchestrator provides callbacks for start/stop/save actions.
+type App struct {
+	fyneApp fyne.App
+	window  fyne.Window
+	config  *config.Config
+
+	onStart  func()
+	onStop   func()
+	onSave   func(*config.Config)
+	onListen func(enabled bool)
+	onSearch func(query string, limit int) ([]storage.LogEntry, error)
+
+	// Screens -- only one is shown at a time.
+	downloadScreen *DownloadScreen
+	liveView       *LiveView
+	historyPage    *HistoryPage
+	configPage     *ConfigPage
+}
+
+// NewApp creates the Fyne application and main window. Call SetCallbacks
+// before Run to wire up orchestrator actions.
+func NewApp(cfg *config.Config) *App {
+	fyneApp := app.NewWithID("com.joe.radiotranscriber")
+	fyneApp.Settings().SetTheme(theme.DarkTheme())
+
+	window := fyneApp.NewWindow("RadioTranscriber")
+	window.Resize(fyne.NewSize(700, 500))
+
+	return &App{
+		fyneApp: fyneApp,
+		window:  window,
+		config:  cfg,
+	}
+}
+
+// SetCallbacks wires the UI to the orchestrator. Must be called before Run.
+func (a *App) SetCallbacks(onStart, onStop func(), onSave func(*config.Config)) {
+	a.onStart = onStart
+	a.onStop = onStop
+	a.onSave = onSave
+}
+
+// SetListenCallback sets the callback for the listen toggle.
+func (a *App) SetListenCallback(cb func(enabled bool)) {
+	a.onListen = cb
+}
+
+// SetSearchCallback sets the callback for history search queries.
+func (a *App) SetSearchCallback(cb func(query string, limit int) ([]storage.LogEntry, error)) {
+	a.onSearch = cb
+}
+
+// Run shows the window and blocks on the Fyne event loop. Must be called
+// from the main goroutine.
+func (a *App) Run() {
+	a.window.ShowAndRun()
+}
+
+// ShowDownloadScreen replaces the window content with the model download
+// progress screen.
+func (a *App) ShowDownloadScreen(modelsDir, modelSize string) {
+	a.downloadScreen = NewDownloadScreen(modelSize)
+	a.window.SetContent(a.downloadScreen.Container())
+}
+
+// ShowMainScreen replaces the window content with the live view and config
+// tabs. This is the normal operating view. Safe to call from any goroutine.
+func (a *App) ShowMainScreen() {
+	fyne.Do(func() {
+		a.liveView = NewLiveView(a.onStart, a.onStop, a.onListen)
+		a.historyPage = NewHistoryPage(a.onSearch)
+		a.configPage = NewConfigPage(a.config, a.onSave)
+
+		tabs := container.NewAppTabs(
+			container.NewTabItem("Live", a.liveView.Container()),
+			container.NewTabItem("History", a.historyPage.Container()),
+			container.NewTabItem("Settings", a.configPage.Container()),
+		)
+		tabs.SetTabLocation(container.TabLocationTop)
+
+		a.window.SetContent(tabs)
+	})
+}
+
+// UpdateDownloadProgress forwards download progress to the download screen.
+// Safe to call from any goroutine.
+func (a *App) UpdateDownloadProgress(downloaded, total int64) {
+	if a.downloadScreen != nil {
+		a.downloadScreen.UpdateProgress(downloaded, total)
+	}
+}
+
+// AppendTranscription adds a timestamped transcription line to the live view.
+// Safe to call from any goroutine.
+func (a *App) AppendTranscription(timestamp time.Time, text string) {
+	if a.liveView != nil {
+		a.liveView.AppendTranscription(timestamp, text)
+	}
+}
+
+// AppendSong adds a song divider to the live view.
+// Safe to call from any goroutine.
+func (a *App) AppendSong(title, artist string) {
+	if a.liveView != nil {
+		a.liveView.AppendSong(title, artist)
+	}
+}
+
+// AppendMusic adds an unknown-music divider to the live view.
+// Safe to call from any goroutine.
+func (a *App) AppendMusic() {
+	if a.liveView != nil {
+		a.liveView.AppendMusic()
+	}
+}
+
+// UpdateStatus updates the status bar in the live view.
+// Safe to call from any goroutine.
+func (a *App) UpdateStatus(connected bool, classification string) {
+	if a.liveView != nil {
+		a.liveView.UpdateStatus(connected, classification)
+	}
+}
