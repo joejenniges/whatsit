@@ -31,6 +31,7 @@ type UI interface {
 	AppendTranscription(timestamp time.Time, text string)
 	AppendSong(title, artist string)
 	AppendMusic()
+	ClearMusicMarker()
 	UpdateStatus(connected bool, classification string)
 	UpdateLatency(latency time.Duration)
 	Run()
@@ -51,7 +52,8 @@ type Orchestrator struct {
 
 	// WHY optional: musicid requires libchromaprint and an AcoustID API key.
 	// If either is unavailable, we still run -- just skip song identification.
-	fingerprinter *musicid.Fingerprinter
+	fingerprinter  *musicid.Fingerprinter
+	acoustidClient *musicid.AcoustIDClient
 
 	// WHY: Listener plays decoded stereo PCM through speakers when the user
 	// toggles "Listen" on. It sits between decoder and resampler in the
@@ -161,6 +163,17 @@ func (o *Orchestrator) finishInit(modelPath string) {
 		log.Printf("app: fingerprinter unavailable, music ID disabled: %v", fpErr)
 	} else {
 		o.fingerprinter = fp
+	}
+
+	// Init AcoustID client if API key is configured.
+	if o.config.AcoustIDKey != "" {
+		client, clientErr := musicid.NewAcoustIDClient(o.config.AcoustIDKey)
+		if clientErr != nil {
+			log.Printf("app: acoustid client init failed: %v", clientErr)
+		} else {
+			o.acoustidClient = client
+			log.Printf("app: acoustid client initialized")
+		}
 	}
 
 	tier := o.config.ClassifierTier
@@ -305,6 +318,7 @@ func (o *Orchestrator) processingLoop() {
 			if lastClass == classifier.ClassMusic {
 				o.flushMusicBuffer()
 				o.transcriber.Reset()
+				o.ui.ClearMusicMarker()
 			}
 			silenceSamples = 0
 
@@ -326,9 +340,11 @@ func (o *Orchestrator) processingLoop() {
 			}
 
 		case classifier.ClassMusic:
-			// Transitioning from speech -> music: reset transcriber window.
+			// Transitioning from speech -> music: reset transcriber window,
+			// show a single "Music playing" marker in the UI.
 			if lastClass == classifier.ClassSpeech {
 				o.transcriber.Reset()
+				o.ui.AppendMusic() // Shows once; subsequent calls are no-ops.
 			}
 			silenceSamples = 0
 			o.musicBuffer.Write(chunk)
@@ -368,13 +384,16 @@ func (o *Orchestrator) flushMusicBuffer() {
 	go o.identifyMusic()
 }
 
-// identifyMusic drains the music buffer, fingerprints it, and logs the result.
+// identifyMusic drains the music buffer, fingerprints it, and tries to
+// identify the song via AcoustID. If identified, replaces the UI's
+// "Music playing" placeholder with the song name.
 func (o *Orchestrator) identifyMusic() {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("PANIC in identifyMusic: %v\n%s", r, debug.Stack())
 		}
 	}()
+
 	samples := o.musicBuffer.ReadAll()
 	if len(samples) == 0 {
 		return
@@ -383,38 +402,38 @@ func (o *Orchestrator) identifyMusic() {
 	durationMs := int64(len(samples)) * 1000 / int64(whisperSampleRate)
 
 	// Try fingerprinting + AcoustID lookup if available.
-	if o.fingerprinter != nil && o.config.AcoustIDKey != "" {
+	if o.fingerprinter != nil && o.acoustidClient != nil {
 		fp, dur, fpErr := o.fingerprinter.Fingerprint(samples, whisperSampleRate)
 		if fpErr != nil {
 			log.Printf("app: fingerprint: %v", fpErr)
 		} else {
-			client, clientErr := musicid.NewAcoustIDClient(o.config.AcoustIDKey)
-			if clientErr == nil {
-				song, lookupErr := client.Identify(fp, dur)
-				if lookupErr != nil {
-					log.Printf("app: acoustid lookup: %v", lookupErr)
-				} else if song != nil {
-					entry := &storage.LogEntry{
-						Timestamp:  time.Now(),
-						EntryType:  "song",
-						Content:    song.Title + " - " + song.Artist,
-						Title:      song.Title,
-						Artist:     song.Artist,
-						Album:      song.Album,
-						Confidence: song.Score,
-						DurationMs: durationMs,
-					}
-					if err := o.db.InsertEntry(entry); err != nil {
-						log.Printf("app: insert song entry: %v", err)
-					}
-					o.ui.AppendSong(song.Title, song.Artist)
-					return
+			song, lookupErr := o.acoustidClient.Identify(fp, dur)
+			if lookupErr != nil {
+				log.Printf("app: acoustid lookup: %v", lookupErr)
+			} else if song != nil {
+				log.Printf("app: identified song: %q by %s (score %.2f)", song.Title, song.Artist, song.Score)
+				entry := &storage.LogEntry{
+					Timestamp:  time.Now(),
+					EntryType:  "song",
+					Content:    song.Title + " - " + song.Artist,
+					Title:      song.Title,
+					Artist:     song.Artist,
+					Album:      song.Album,
+					Confidence: song.Score,
+					DurationMs: durationMs,
 				}
+				if err := o.db.InsertEntry(entry); err != nil {
+					log.Printf("app: insert song entry: %v", err)
+				}
+				// Replace the "Music playing" placeholder with the actual song.
+				o.ui.AppendSong(song.Title, song.Artist)
+				return
 			}
 		}
 	}
 
-	// No song identified -- record as unknown music.
+	// No song identified -- just log it. The UI already shows "Music playing"
+	// from the transition, so don't add another marker.
 	entry := &storage.LogEntry{
 		Timestamp:  time.Now(),
 		EntryType:  "music_unknown",
@@ -423,8 +442,6 @@ func (o *Orchestrator) identifyMusic() {
 	if err := o.db.InsertEntry(entry); err != nil {
 		log.Printf("app: insert music entry: %v", err)
 	}
-
-	o.ui.AppendMusic()
 }
 
 // stopStreaming tears down the audio pipeline.

@@ -129,6 +129,14 @@ func (a *App) AppendMusic() {
 	}
 }
 
+// ClearMusicMarker resets the music segment tracker in the live view.
+// Safe to call from any goroutine.
+func (a *App) ClearMusicMarker() {
+	if a.liveView != nil {
+		a.liveView.ClearMusicMarker()
+	}
+}
+
 // UpdateStatus updates the status bar in the live view.
 // Safe to call from any goroutine.
 func (a *App) UpdateStatus(connected bool, classification string) {

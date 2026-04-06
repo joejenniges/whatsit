@@ -8,16 +8,26 @@ type MFCCThresholds struct {
 	MFCCVarianceSpeechMin    float64 // mean MFCC variance above this suggests speech
 	SpectralRolloffSpeechMax float64 // rolloff below this (Hz) suggests speech
 	DeltaMFCCMeanSpeechMin   float64 // mean absolute delta-MFCC above this suggests speech
+	SpectralFlatnessMusicMax float64 // flatness below this suggests music (tonal content)
+	LowEnergyPercentMin      float64 // % low-energy frames above this suggests speech
 }
 
-// DefaultMFCCThresholds returns starting thresholds. These will need tuning
-// against real radio audio, just like the legacy classifier needed tuning.
+// DefaultMFCCThresholds returns thresholds tuned against real compressed
+// radio audio (320kbps MP3, resampled to 16kHz mono).
+//
+// WHY these values: calibration against a live jazz/music radio stream showed
+// music with mfcc_var 14-30, delta 2.1-2.9, rolloff 1555-3723. The original
+// thresholds (mfcc_var 12, delta 1.0, rolloff 3500) gave false positives on
+// dynamic music genres (jazz, orchestral). Raised thresholds and added flatness
+// + low-energy % as counter-features to prevent this.
 func DefaultMFCCThresholds() MFCCThresholds {
 	return MFCCThresholds{
 		SilenceRMS:               0.005,
-		MFCCVarianceSpeechMin:    12.0,
-		SpectralRolloffSpeechMax: 3500.0,
-		DeltaMFCCMeanSpeechMin:   1.0,
+		MFCCVarianceSpeechMin:    35.0,  // WHY: jazz music reaches 30, speech typically >40
+		SpectralRolloffSpeechMax: 2500.0, // WHY: tightened from 3500; music rolloff is 1500-3700
+		DeltaMFCCMeanSpeechMin:   3.5,   // WHY: raised from 1.0; music delta is 2.1-2.9
+		SpectralFlatnessMusicMax: 0.15,  // WHY: music flatness 0.06-0.16, speech 0.2-0.6
+		LowEnergyPercentMin:     0.55,   // WHY: speech has 60-80% low-energy frames, music 40-55%
 	}
 }
 
@@ -105,32 +115,60 @@ func (c *MFCCClassifier) Classify(samples []float32) Classification {
 	// averaged across frames.
 	rolloff := c.meanSpectralRolloff(samples)
 
-	// Step 6: scoring.
-	// WHY these weights: MFCC variance is the strongest cepstral feature for
-	// speech/music discrimination. Speech has higher frame-to-frame cepstral
-	// variation (formant transitions, pauses) while music has more stable
-	// cepstral structure. Delta MFCC reinforces this. Spectral rolloff adds
-	// a complementary frequency-domain signal (speech energy rolls off lower).
+	// Step 6: spectral flatness -- strong music indicator.
+	flatness := SpectralFlatness(samples)
+
+	// Step 7: low-energy frame percentage -- speech is bursty with pauses.
+	lowEnergy := c.lowEnergyPercent(samples)
+
+	// Step 8: scoring with both speech and music indicators.
+	// WHY both directions: the original scoring only had positive (speech)
+	// signals with no counter-evidence for music. Jazz and orchestral music
+	// have high MFCC variance and high deltas, tripping all speech thresholds.
+	// Adding flatness and low-energy % as music counter-signals prevents this.
 	var score float64
 
+	// MFCC variance: speech typically >40, music 14-30 (jazz can reach 30).
 	if meanVar > c.Thresholds.MFCCVarianceSpeechMin {
-		score += 3.0 // strongest signal
+		score += 3.0
+	} else {
+		score -= 1.5
 	}
+
+	// Delta MFCC: speech typically >3.5, music 2.1-2.9.
 	if deltaMean > c.Thresholds.DeltaMFCCMeanSpeechMin {
 		score += 2.0
+	} else {
+		score -= 1.0
 	}
+
+	// Spectral rolloff: speech rolls off lower.
 	if rolloff < c.Thresholds.SpectralRolloffSpeechMax {
-		score += 1.5 // speech rolls off lower than music
+		score += 1.0
+	}
+
+	// Spectral flatness: low flatness = tonal = music.
+	if flatness < c.Thresholds.SpectralFlatnessMusicMax {
+		score -= 2.0
+	} else if flatness > 0.25 {
+		score += 1.5 // noise-like = speech
+	}
+
+	// Low-energy frame %: speech has lots of pauses (60-80%), music is sustained (40-55%).
+	if lowEnergy > c.Thresholds.LowEnergyPercentMin {
+		score += 2.0
+	} else {
+		score -= 1.0
 	}
 
 	raw := ClassMusic
-	if score >= 3.5 {
+	if score > 0 {
 		raw = ClassSpeech
 	}
 
 	if c.Debug {
-		debugLog("mfcc", "mfcc_var=%.1f delta=%.2f rolloff=%.0f -> %s",
-			meanVar, deltaMean, rolloff, raw)
+		debugLog("mfcc", "mfcc_var=%.1f delta=%.2f rolloff=%.0f flat=%.3f low_e=%.2f score=%.1f -> %s",
+			meanVar, deltaMean, rolloff, flatness, lowEnergy, score, raw)
 	}
 
 	return c.debounce(raw)
@@ -189,6 +227,41 @@ func (c *MFCCClassifier) meanSpectralRolloff(samples []float32) float64 {
 	}
 
 	return rolloffSum / float64(numFrames)
+}
+
+// lowEnergyPercent computes the fraction of 25ms frames with RMS below the
+// chunk's mean RMS. Speech: 60-80% (pauses), Music: 40-55% (sustained).
+func (c *MFCCClassifier) lowEnergyPercent(samples []float32) float64 {
+	cfg := c.extractor.config
+	frameLen := int(cfg.FrameLenMs * float64(cfg.SampleRate) / 1000.0)
+	hopLen := int(cfg.FrameHopMs * float64(cfg.SampleRate) / 1000.0)
+
+	if len(samples) < frameLen {
+		return 0
+	}
+
+	numFrames := (len(samples)-frameLen)/hopLen + 1
+	energies := make([]float64, numFrames)
+	var totalEnergy float64
+
+	for i := 0; i < numFrames; i++ {
+		start := i * hopLen
+		end := start + frameLen
+		if end > len(samples) {
+			end = len(samples)
+		}
+		energies[i] = float64(RMSEnergy(samples[start:end]))
+		totalEnergy += energies[i]
+	}
+
+	meanEnergy := totalEnergy / float64(numFrames)
+	lowCount := 0
+	for _, e := range energies {
+		if e < meanEnergy {
+			lowCount++
+		}
+	}
+	return float64(lowCount) / float64(numFrames)
 }
 
 // debounce requires debounceN consecutive identical raw classifications before

@@ -31,14 +31,20 @@ type LiveView struct {
 	// enabled state.
 	running   bool
 	listening bool
+
+	// musicSegIdx is the index of the current "--- Music playing ---" segment
+	// in textArea.Segments, or -1 if there isn't one. Used to replace it with
+	// song info when identified.
+	musicSegIdx int
 }
 
 // NewLiveView creates the live transcription view.
 func NewLiveView(onStart, onStop func(), onListen func(enabled bool)) *LiveView {
 	lv := &LiveView{
-		onStart:  onStart,
-		onStop:   onStop,
-		onListen: onListen,
+		onStart:     onStart,
+		onStop:      onStop,
+		onListen:    onListen,
+		musicSegIdx: -1,
 	}
 
 	// RichText starts empty. We append segments as events arrive.
@@ -115,7 +121,8 @@ func (lv *LiveView) AppendTranscription(timestamp time.Time, text string) {
 	})
 }
 
-// AppendSong adds a song identification divider.
+// AppendSong adds a song identification divider. If there's an existing
+// "--- Music playing ---" marker, it replaces that marker with the song info.
 // Safe to call from any goroutine.
 func (lv *LiveView) AppendSong(title, artist string) {
 	line := fmt.Sprintf("--- \"%s\" - %s ---", title, artist)
@@ -128,26 +135,48 @@ func (lv *LiveView) AppendSong(title, artist string) {
 	}
 
 	fyne.Do(func() {
+		if lv.musicSegIdx >= 0 && lv.musicSegIdx < len(lv.textArea.Segments) {
+			// Replace the placeholder with the actual song info.
+			lv.textArea.Segments[lv.musicSegIdx] = seg
+		} else {
+			lv.textArea.Segments = append(lv.textArea.Segments, seg)
+		}
+		lv.musicSegIdx = -1
+		lv.textArea.Refresh()
+		lv.scrollToBottom()
+	})
+}
+
+// AppendMusic adds a "--- Music playing ---" placeholder. Only adds one per
+// music segment -- subsequent calls while already showing music are no-ops.
+// The placeholder can be replaced by AppendSong if the song is identified.
+// Safe to call from any goroutine.
+func (lv *LiveView) AppendMusic() {
+	fyne.Do(func() {
+		// Already showing a music marker for this segment.
+		if lv.musicSegIdx >= 0 {
+			return
+		}
+
+		seg := &widget.TextSegment{
+			Text: "--- Music playing ---\n",
+			Style: widget.RichTextStyle{
+				TextStyle: fyne.TextStyle{Italic: true},
+			},
+		}
+
+		lv.musicSegIdx = len(lv.textArea.Segments)
 		lv.textArea.Segments = append(lv.textArea.Segments, seg)
 		lv.textArea.Refresh()
 		lv.scrollToBottom()
 	})
 }
 
-// AppendMusic adds a generic music-playing divider.
-// Safe to call from any goroutine.
-func (lv *LiveView) AppendMusic() {
-	seg := &widget.TextSegment{
-		Text: "--- Music playing ---\n",
-		Style: widget.RichTextStyle{
-			TextStyle: fyne.TextStyle{Italic: true},
-		},
-	}
-
+// ClearMusicMarker resets the music segment tracker. Call when transitioning
+// away from music (e.g. back to speech).
+func (lv *LiveView) ClearMusicMarker() {
 	fyne.Do(func() {
-		lv.textArea.Segments = append(lv.textArea.Segments, seg)
-		lv.textArea.Refresh()
-		lv.scrollToBottom()
+		lv.musicSegIdx = -1
 	})
 }
 
