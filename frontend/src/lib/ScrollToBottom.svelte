@@ -12,9 +12,9 @@
 
 <style>
   .scroll-fab {
-    position: absolute;
-    bottom: 16px;
-    right: 16px;
+    position: fixed;
+    bottom: 60px;
+    right: 24px;
     width: 36px;
     height: 36px;
     border-radius: 50%;

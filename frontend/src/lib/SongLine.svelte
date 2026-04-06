@@ -1,7 +1,7 @@
 <script lang="ts">
   import { splitAtMatches, type TextSegment } from '../utils/highlight';
 
-  let { id, title, artist, content, entryType, timestamp, regex, onsave, ondelete }: {
+  let { id, title, artist, content, entryType, timestamp, regex, onsave, ondelete, selected, ontoggleselect }: {
     id: number;
     title: string;
     artist: string;
@@ -11,7 +11,16 @@
     regex: RegExp | null;
     onsave: (id: number, title: string, artist: string) => void;
     ondelete: () => void;
+    selected: boolean;
+    ontoggleselect: (id: number, shiftKey: boolean) => void;
   } = $props();
+
+  function handleClick(e: MouseEvent) {
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      ontoggleselect(id, e.shiftKey);
+    }
+  }
 
   let timeStr = $derived(
     timestamp.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -66,7 +75,7 @@
   }
 </script>
 
-<div class="entry song">
+<div class="entry song" class:selected onclick={handleClick} role="listitem">
   {#if editing}
     <div class="edit-form">
       <input
@@ -114,10 +123,14 @@
     line-height: 1.5;
   }
   .song {
-    background: rgba(74, 158, 255, 0.15);
+    background: rgba(74, 158, 255, 0.10);
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+  .song.selected {
+    outline: 1px solid rgba(74, 158, 255, 0.5);
+    background: rgba(74, 158, 255, 0.20);
   }
   .timestamp {
     color: #666;

@@ -33,6 +33,7 @@
   let classification = $state('--');
   let streaming = $state(false);
   let listenEnabled = $state(false);
+  let selectedCount = $state(0);
 
   // Scroll state
   let scrollContainer: HTMLDivElement | undefined = $state(undefined);
@@ -55,6 +56,7 @@
     classification = getClassification();
     streaming = getStreaming();
     listenEnabled = getListenEnabled();
+    selectedCount = getSelectedEntries().length;
   }
 
   function scrollToBottom() {
@@ -326,9 +328,9 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="live-view" onkeydown={handleKeydown} tabindex="-1">
-  {#if getSelectedEntries().length > 0}
+  {#if selectedCount > 0}
     <div class="selection-toolbar">
-      <span>{getSelectedEntries().length} selected</span>
+      <span>{selectedCount} selected</span>
       <button onclick={handleCopySelected}>Copy</button>
       <button class="danger" onclick={handleBulkDelete}>Delete</button>
       <button onclick={() => clearSelection()}>Clear</button>
@@ -370,6 +372,8 @@
           entryType={entry.type}
           timestamp={entry.timestamp}
           {regex}
+          selected={isSelected(entry.id)}
+          ontoggleselect={handleToggleSelect}
           onsave={handleSongSave}
           ondelete={() => handleDelete(entry.id)}
         />
@@ -384,8 +388,9 @@
       <div class="empty-state">No matching entries.</div>
     {/if}
 
-    <ScrollToBottom visible={showScrollBtn} onclick={handleScrollToBottom} />
   </div>
+
+  <ScrollToBottom visible={showScrollBtn} onclick={handleScrollToBottom} />
 
   <StatusBar
     {connected}
