@@ -36,7 +36,7 @@ func (c *BasicClassifier) Name() string { return "basic" }
 // that still separate speech (noise-like, high flatness, moderate-high ZCR)
 // from music (tonal peaks, low flatness). This is the "good enough" tier
 // for when CPU matters more than accuracy.
-func (c *BasicClassifier) Classify(samples []float32) Classification {
+func (c *BasicClassifier) Classify(samples []float32) ClassifyResult {
 	if len(samples) == 0 {
 		return c.debounce(ClassSilence)
 	}
@@ -82,7 +82,7 @@ func (c *BasicClassifier) Classify(samples []float32) Classification {
 
 // debounce requires debounceN consecutive identical raw classifications
 // before the output switches. Same logic as LegacyClassifier.debounce.
-func (c *BasicClassifier) debounce(raw Classification) Classification {
+func (c *BasicClassifier) debounce(raw Classification) ClassifyResult {
 	if raw == c.rawClass {
 		c.consistentCount++
 	} else {
@@ -93,5 +93,5 @@ func (c *BasicClassifier) debounce(raw Classification) Classification {
 	if c.consistentCount >= c.debounceN {
 		c.lastClass = c.rawClass
 	}
-	return c.lastClass
+	return ClassifyResult{Raw: raw, Debounced: c.lastClass}
 }

@@ -11,8 +11,11 @@ func TestClassify_Silence(t *testing.T) {
 
 	samples := make([]float32, 32000) // 2s of silence at 16 kHz
 	result := c.Classify(samples)
-	if result != ClassSilence {
-		t.Errorf("expected ClassSilence for zero samples, got %s", result)
+	if result.Debounced != ClassSilence {
+		t.Errorf("expected ClassSilence for zero samples, got %s", result.Debounced)
+	}
+	if result.Raw != ClassSilence {
+		t.Errorf("expected raw ClassSilence for zero samples, got %s", result.Raw)
 	}
 }
 
@@ -21,8 +24,8 @@ func TestClassify_EmptyInput(t *testing.T) {
 	c.SetDebounce(1)
 
 	result := c.Classify(nil)
-	if result != ClassSilence {
-		t.Errorf("expected ClassSilence for nil input, got %s", result)
+	if result.Debounced != ClassSilence {
+		t.Errorf("expected ClassSilence for nil input, got %s", result.Debounced)
 	}
 }
 
@@ -50,8 +53,8 @@ func TestClassify_LoudNoise(t *testing.T) {
 	result := c.Classify(samples)
 	// With max ZCR, bursty energy, and high flux (first call, no prev spectrum)
 	// this should classify as speech or at least not silence.
-	if result == ClassSilence {
-		t.Errorf("expected non-silence for loud noisy signal, got %s", result)
+	if result.Debounced == ClassSilence {
+		t.Errorf("expected non-silence for loud noisy signal, got %s", result.Debounced)
 	}
 }
 
@@ -74,8 +77,8 @@ func TestClassify_SustainedTone(t *testing.T) {
 	// Second call with identical signal should see zero flux -> music.
 	result := c.Classify(samples)
 
-	if result == ClassSilence {
-		t.Errorf("expected non-silence for sustained tone, got %s", result)
+	if result.Debounced == ClassSilence {
+		t.Errorf("expected non-silence for sustained tone, got %s", result.Debounced)
 	}
 }
 
@@ -87,22 +90,25 @@ func TestDebounce_RequiresConsecutive(t *testing.T) {
 	// the output doesn't switch until the third consecutive call.
 	speechSamples := makeSpeechLike(32000)
 
-	// Call 1: raw = speech, count = 1, output still silence
+	// Call 1: raw = speech, count = 1, debounced still silence
 	r1 := c.Classify(speechSamples)
-	if r1 != ClassSilence {
-		t.Errorf("debounce call 1: expected ClassSilence (still debouncing), got %s", r1)
+	if r1.Debounced != ClassSilence {
+		t.Errorf("debounce call 1: expected Debounced=ClassSilence (still debouncing), got %s", r1.Debounced)
+	}
+	if r1.Raw == ClassSilence {
+		t.Errorf("debounce call 1: expected Raw != ClassSilence, got %s", r1.Raw)
 	}
 
-	// Call 2: raw = speech, count = 2, output still silence
+	// Call 2: raw = speech, count = 2, debounced still silence
 	r2 := c.Classify(speechSamples)
-	if r2 != ClassSilence {
-		t.Errorf("debounce call 2: expected ClassSilence (still debouncing), got %s", r2)
+	if r2.Debounced != ClassSilence {
+		t.Errorf("debounce call 2: expected Debounced=ClassSilence (still debouncing), got %s", r2.Debounced)
 	}
 
-	// Call 3: raw = speech, count = 3, output switches to speech
+	// Call 3: raw = speech, count = 3, debounced switches to speech
 	r3 := c.Classify(speechSamples)
-	if r3 == ClassSilence {
-		t.Errorf("debounce call 3: expected classification to switch away from silence, got %s", r3)
+	if r3.Debounced == ClassSilence {
+		t.Errorf("debounce call 3: expected Debounced to switch away from silence, got %s", r3.Debounced)
 	}
 }
 
@@ -120,19 +126,19 @@ func TestDebounce_InterruptResetsCount(t *testing.T) {
 
 	// Now two more speech calls -- not enough to hit 3 consecutive.
 	r := c.Classify(speech)
-	if r != ClassSilence {
-		t.Errorf("expected ClassSilence after interrupted debounce, got %s", r)
+	if r.Debounced != ClassSilence {
+		t.Errorf("expected Debounced=ClassSilence after interrupted debounce, got %s", r.Debounced)
 	}
 
 	r = c.Classify(speech)
-	if r != ClassSilence {
-		t.Errorf("expected ClassSilence (only 2 consecutive), got %s", r)
+	if r.Debounced != ClassSilence {
+		t.Errorf("expected Debounced=ClassSilence (only 2 consecutive), got %s", r.Debounced)
 	}
 
 	// Third consecutive speech call should finally switch.
 	r = c.Classify(speech)
-	if r == ClassSilence {
-		t.Errorf("expected non-silence after 3 consecutive speech calls, got %s", r)
+	if r.Debounced == ClassSilence {
+		t.Errorf("expected non-silence after 3 consecutive speech calls, got %s", r.Debounced)
 	}
 }
 
@@ -143,8 +149,8 @@ func TestSetDebounce_MinimumOne(t *testing.T) {
 	// Should be clamped to 1, meaning immediate switching.
 	silence := make([]float32, 32000)
 	r := c.Classify(silence)
-	if r != ClassSilence {
-		t.Errorf("expected ClassSilence with debounce=1, got %s", r)
+	if r.Debounced != ClassSilence {
+		t.Errorf("expected ClassSilence with debounce=1, got %s", r.Debounced)
 	}
 }
 

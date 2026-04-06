@@ -66,7 +66,7 @@ func (c *MFCCClassifier) Name() string { return "mfcc" }
 
 // Classify analyses a chunk of PCM audio (expected ~2s at sampleRate) and
 // returns the classification with debounce.
-func (c *MFCCClassifier) Classify(samples []float32) Classification {
+func (c *MFCCClassifier) Classify(samples []float32) ClassifyResult {
 	if len(samples) == 0 {
 		return c.debounce(ClassSilence)
 	}
@@ -266,7 +266,7 @@ func (c *MFCCClassifier) lowEnergyPercent(samples []float32) float64 {
 
 // debounce requires debounceN consecutive identical raw classifications before
 // the output switches. Same logic as the legacy classifier.
-func (c *MFCCClassifier) debounce(raw Classification) Classification {
+func (c *MFCCClassifier) debounce(raw Classification) ClassifyResult {
 	if raw == c.lastRaw {
 		c.consistentCount++
 	} else {
@@ -277,7 +277,7 @@ func (c *MFCCClassifier) debounce(raw Classification) Classification {
 	if c.consistentCount >= c.debounceN {
 		c.lastClass = c.lastRaw
 	}
-	return c.lastClass
+	return ClassifyResult{Raw: raw, Debounced: c.lastClass}
 }
 
 // MFCCVariance computes the variance of each MFCC coefficient across all

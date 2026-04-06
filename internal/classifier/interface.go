@@ -9,12 +9,26 @@ const (
 	ClassSilence Classification = "silence"
 )
 
+// ClassifyResult contains both the raw (pre-debounce) and final (debounced)
+// classification. The orchestrator uses Raw to buffer audio during transitions,
+// preventing audio loss when the debounce hasn't confirmed a state change yet.
+//
+// WHY both values: With debounce_chunks=5 and 2-second chunks, the classifier
+// needs 10 seconds of consistent classification before switching state. A
+// 5-second DJ break between songs only produces 2-3 speech chunks -- not enough
+// to flip the debounce. Without Raw, those chunks get classified as "music"
+// (the debounced state) and the speech is silently discarded.
+type ClassifyResult struct {
+	Raw       Classification // What this chunk actually looks like
+	Debounced Classification // The stable, debounced output
+}
+
 // AudioClassifier is the interface all classification tiers implement.
 type AudioClassifier interface {
 	// Classify analyses a chunk of PCM audio (mono float32) and returns
-	// the classification. Implementations may maintain internal state
-	// (e.g. debounce, previous spectrum) between calls.
-	Classify(samples []float32) Classification
+	// both raw and debounced classifications. Implementations may maintain
+	// internal state (e.g. debounce, previous spectrum) between calls.
+	Classify(samples []float32) ClassifyResult
 
 	// Name returns a human-readable identifier for the tier.
 	Name() string

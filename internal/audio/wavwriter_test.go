@@ -8,11 +8,11 @@ import (
 	"testing"
 )
 
-func TestWAVWriter_ValidHeader(t *testing.T) {
+func TestWAVWriter_Float32_ValidHeader(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.wav")
 
-	w, err := NewWAVWriter(path, 16000, 1)
+	w, err := NewWAVWriter(path, 16000, 1, WAVFormatFloat32)
 	if err != nil {
 		t.Fatalf("NewWAVWriter: %v", err)
 	}
@@ -22,14 +22,13 @@ func TestWAVWriter_ValidHeader(t *testing.T) {
 		samples[i] = float32(i) / float32(len(samples)) // ramp 0..1
 	}
 
-	if err := w.Write(samples); err != nil {
-		t.Fatalf("Write: %v", err)
+	if err := w.WriteFloat32(samples); err != nil {
+		t.Fatalf("WriteFloat32: %v", err)
 	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
-	// Read the file back and verify header.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
@@ -85,48 +84,23 @@ func TestWAVWriter_ValidHeader(t *testing.T) {
 	}
 }
 
-func TestWAVWriter_FileSize(t *testing.T) {
+func TestWAVWriter_Int16_ValidHeader(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.wav")
 
-	w, err := NewWAVWriter(path, 16000, 1)
+	w, err := NewWAVWriter(path, 48000, 2, WAVFormatInt16)
 	if err != nil {
 		t.Fatalf("NewWAVWriter: %v", err)
 	}
 
-	numSamples := 32000 // 2 seconds
-	samples := make([]float32, numSamples)
-	if err := w.Write(samples); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	// 1 second of stereo silence at 48kHz = 96000 samples
+	samples := make([]int16, 96000)
+	for i := range samples {
+		samples[i] = int16(i % 32767)
 	}
 
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
-	}
-
-	expectedSize := int64(44 + numSamples*4) // header + samples
-	if info.Size() != expectedSize {
-		t.Errorf("expected file size %d, got %d", expectedSize, info.Size())
-	}
-}
-
-func TestWAVWriter_SampleValues(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test.wav")
-
-	w, err := NewWAVWriter(path, 16000, 1)
-	if err != nil {
-		t.Fatalf("NewWAVWriter: %v", err)
-	}
-
-	// Write known values.
-	samples := []float32{0.0, 0.5, -0.5, 1.0, -1.0}
-	if err := w.Write(samples); err != nil {
-		t.Fatalf("Write: %v", err)
+	if err := w.WriteInt16(samples); err != nil {
+		t.Fatalf("WriteInt16: %v", err)
 	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -137,7 +111,122 @@ func TestWAVWriter_SampleValues(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 
-	// Read samples back from after the 44-byte header.
+	audioFormat := binary.LittleEndian.Uint16(data[20:22])
+	if audioFormat != 1 { // PCM
+		t.Errorf("expected format 1 (PCM), got %d", audioFormat)
+	}
+	channels := binary.LittleEndian.Uint16(data[22:24])
+	if channels != 2 {
+		t.Errorf("expected 2 channels, got %d", channels)
+	}
+	sampleRate := binary.LittleEndian.Uint32(data[24:28])
+	if sampleRate != 48000 {
+		t.Errorf("expected sample rate 48000, got %d", sampleRate)
+	}
+	bitsPerSample := binary.LittleEndian.Uint16(data[34:36])
+	if bitsPerSample != 16 {
+		t.Errorf("expected 16 bits per sample, got %d", bitsPerSample)
+	}
+
+	// byte rate = 48000 * 2 * 2 = 192000
+	byteRate := binary.LittleEndian.Uint32(data[28:32])
+	if byteRate != 192000 {
+		t.Errorf("expected byte rate 192000, got %d", byteRate)
+	}
+
+	// block align = 2 * 2 = 4
+	blockAlign := binary.LittleEndian.Uint16(data[32:34])
+	if blockAlign != 4 {
+		t.Errorf("expected block align 4, got %d", blockAlign)
+	}
+
+	dataSize := binary.LittleEndian.Uint32(data[40:44])
+	expectedDataSize := uint32(len(samples) * 2)
+	if dataSize != expectedDataSize {
+		t.Errorf("expected data size %d, got %d", expectedDataSize, dataSize)
+	}
+}
+
+func TestWAVWriter_Float32_FileSize(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.wav")
+
+	w, err := NewWAVWriter(path, 16000, 1, WAVFormatFloat32)
+	if err != nil {
+		t.Fatalf("NewWAVWriter: %v", err)
+	}
+
+	numSamples := 32000 // 2 seconds
+	samples := make([]float32, numSamples)
+	if err := w.WriteFloat32(samples); err != nil {
+		t.Fatalf("WriteFloat32: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+
+	expectedSize := int64(44 + numSamples*4)
+	if info.Size() != expectedSize {
+		t.Errorf("expected file size %d, got %d", expectedSize, info.Size())
+	}
+}
+
+func TestWAVWriter_Int16_FileSize(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.wav")
+
+	w, err := NewWAVWriter(path, 48000, 2, WAVFormatInt16)
+	if err != nil {
+		t.Fatalf("NewWAVWriter: %v", err)
+	}
+
+	numSamples := 96000
+	samples := make([]int16, numSamples)
+	if err := w.WriteInt16(samples); err != nil {
+		t.Fatalf("WriteInt16: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+
+	expectedSize := int64(44 + numSamples*2)
+	if info.Size() != expectedSize {
+		t.Errorf("expected file size %d, got %d", expectedSize, info.Size())
+	}
+}
+
+func TestWAVWriter_Float32_SampleValues(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.wav")
+
+	w, err := NewWAVWriter(path, 16000, 1, WAVFormatFloat32)
+	if err != nil {
+		t.Fatalf("NewWAVWriter: %v", err)
+	}
+
+	samples := []float32{0.0, 0.5, -0.5, 1.0, -1.0}
+	if err := w.WriteFloat32(samples); err != nil {
+		t.Fatalf("WriteFloat32: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
 	for i, expected := range samples {
 		offset := 44 + i*4
 		bits := binary.LittleEndian.Uint32(data[offset : offset+4])
@@ -148,23 +237,53 @@ func TestWAVWriter_SampleValues(t *testing.T) {
 	}
 }
 
-func TestWAVWriter_MultipleWrites(t *testing.T) {
+func TestWAVWriter_Int16_SampleValues(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.wav")
 
-	w, err := NewWAVWriter(path, 16000, 1)
+	w, err := NewWAVWriter(path, 48000, 2, WAVFormatInt16)
 	if err != nil {
 		t.Fatalf("NewWAVWriter: %v", err)
 	}
 
-	// Write in two chunks.
+	samples := []int16{0, 1000, -1000, 32767, -32768}
+	if err := w.WriteInt16(samples); err != nil {
+		t.Fatalf("WriteInt16: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	for i, expected := range samples {
+		offset := 44 + i*2
+		got := int16(binary.LittleEndian.Uint16(data[offset : offset+2]))
+		if got != expected {
+			t.Errorf("sample[%d]: expected %d, got %d", i, expected, got)
+		}
+	}
+}
+
+func TestWAVWriter_Float32_MultipleWrites(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.wav")
+
+	w, err := NewWAVWriter(path, 16000, 1, WAVFormatFloat32)
+	if err != nil {
+		t.Fatalf("NewWAVWriter: %v", err)
+	}
+
 	chunk1 := []float32{0.1, 0.2, 0.3}
 	chunk2 := []float32{0.4, 0.5}
-	if err := w.Write(chunk1); err != nil {
-		t.Fatalf("Write chunk1: %v", err)
+	if err := w.WriteFloat32(chunk1); err != nil {
+		t.Fatalf("WriteFloat32 chunk1: %v", err)
 	}
-	if err := w.Write(chunk2); err != nil {
-		t.Fatalf("Write chunk2: %v", err)
+	if err := w.WriteFloat32(chunk2); err != nil {
+		t.Fatalf("WriteFloat32 chunk2: %v", err)
 	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -181,7 +300,6 @@ func TestWAVWriter_MultipleWrites(t *testing.T) {
 		t.Errorf("expected data size %d, got %d", len(allSamples)*4, dataSize)
 	}
 
-	// Verify all sample values.
 	for i, expected := range allSamples {
 		offset := 44 + i*4
 		bits := binary.LittleEndian.Uint32(data[offset : offset+4])
@@ -196,7 +314,7 @@ func TestWAVWriter_Path(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.wav")
 
-	w, err := NewWAVWriter(path, 16000, 1)
+	w, err := NewWAVWriter(path, 16000, 1, WAVFormatFloat32)
 	if err != nil {
 		t.Fatalf("NewWAVWriter: %v", err)
 	}
@@ -212,7 +330,7 @@ func TestWAVWriter_WriteAfterClose(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.wav")
 
-	w, err := NewWAVWriter(path, 16000, 1)
+	w, err := NewWAVWriter(path, 16000, 1, WAVFormatFloat32)
 	if err != nil {
 		t.Fatalf("NewWAVWriter: %v", err)
 	}
@@ -220,8 +338,34 @@ func TestWAVWriter_WriteAfterClose(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	err = w.Write([]float32{1.0})
+	err = w.WriteFloat32([]float32{1.0})
 	if err == nil {
 		t.Error("expected error writing after close")
+	}
+}
+
+func TestWAVWriter_WrongFormatError(t *testing.T) {
+	dir := t.TempDir()
+
+	// Float32 writer should reject WriteInt16.
+	path1 := filepath.Join(dir, "float.wav")
+	w1, err := NewWAVWriter(path1, 16000, 1, WAVFormatFloat32)
+	if err != nil {
+		t.Fatalf("NewWAVWriter float32: %v", err)
+	}
+	defer w1.Close()
+	if err := w1.WriteInt16([]int16{1}); err == nil {
+		t.Error("expected error calling WriteInt16 on float32 writer")
+	}
+
+	// Int16 writer should reject WriteFloat32.
+	path2 := filepath.Join(dir, "int16.wav")
+	w2, err := NewWAVWriter(path2, 48000, 2, WAVFormatInt16)
+	if err != nil {
+		t.Fatalf("NewWAVWriter int16: %v", err)
+	}
+	defer w2.Close()
+	if err := w2.WriteFloat32([]float32{1.0}); err == nil {
+		t.Error("expected error calling WriteFloat32 on int16 writer")
 	}
 }

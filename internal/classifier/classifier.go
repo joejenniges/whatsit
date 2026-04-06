@@ -62,7 +62,7 @@ func (c *LegacyClassifier) SetDebounce(n int) {
 //
 // Expected input: ~2 seconds of 16 kHz mono float32 (32000 samples).
 // Shorter or longer buffers work but may affect threshold accuracy.
-func (c *LegacyClassifier) Classify(samples []float32) Classification {
+func (c *LegacyClassifier) Classify(samples []float32) ClassifyResult {
 	if len(samples) == 0 {
 		return c.debounce(ClassSilence)
 	}
@@ -147,7 +147,7 @@ func (c *LegacyClassifier) Classify(samples []float32) Classification {
 
 // debounce applies hysteresis: the output only changes after debounceN
 // consecutive identical raw classifications.
-func (c *LegacyClassifier) debounce(raw Classification) Classification {
+func (c *LegacyClassifier) debounce(raw Classification) ClassifyResult {
 	if raw == c.rawClass {
 		c.classCount++
 	} else {
@@ -158,5 +158,5 @@ func (c *LegacyClassifier) debounce(raw Classification) Classification {
 	if c.classCount >= c.debounceN {
 		c.lastClass = c.rawClass
 	}
-	return c.lastClass
+	return ClassifyResult{Raw: raw, Debounced: c.lastClass}
 }

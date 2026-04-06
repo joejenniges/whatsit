@@ -74,7 +74,7 @@ func (c *ScheirerClassifier) Name() string { return "scheirer" }
 
 // Classify analyses a chunk of PCM audio using the four Scheirer features
 // and returns a debounced classification.
-func (c *ScheirerClassifier) Classify(samples []float32) Classification {
+func (c *ScheirerClassifier) Classify(samples []float32) ClassifyResult {
 	if len(samples) < c.frameLen {
 		return c.debounce(ClassSilence)
 	}
@@ -132,11 +132,13 @@ func (c *ScheirerClassifier) Classify(samples []float32) Classification {
 
 // debounce requires debounceN consecutive identical raw classifications
 // before switching the output. Prevents rapid toggling on transitions.
-func (c *ScheirerClassifier) debounce(raw Classification) Classification {
+// Returns both the raw and debounced classification so the orchestrator
+// can buffer audio during transitions.
+func (c *ScheirerClassifier) debounce(raw Classification) ClassifyResult {
 	if raw == c.lastClass {
 		// Already outputting this class, keep the counter saturated.
 		c.consistentCount = c.debounceN
-		return c.lastClass
+		return ClassifyResult{Raw: raw, Debounced: c.lastClass}
 	}
 
 	// Raw disagrees with current output.
@@ -148,7 +150,7 @@ func (c *ScheirerClassifier) debounce(raw Classification) Classification {
 		// Silence transitions are instant -- the RMS gate already filtered.
 		c.lastClass = ClassSilence
 		c.consistentCount = c.debounceN
-		return c.lastClass
+		return ClassifyResult{Raw: raw, Debounced: c.lastClass}
 	}
 
 	c.consistentCount++
@@ -156,7 +158,7 @@ func (c *ScheirerClassifier) debounce(raw Classification) Classification {
 		c.lastClass = raw
 		c.consistentCount = c.debounceN
 	}
-	return c.lastClass
+	return ClassifyResult{Raw: raw, Debounced: c.lastClass}
 }
 
 // ComputeScheirerFeatures extracts the four Scheirer & Slaney features

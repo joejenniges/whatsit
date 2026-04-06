@@ -46,11 +46,16 @@ func NewWhisperClassifier(classifyFunc WhisperClassifyFunc) *WhisperClassifier {
 
 // Classify appends samples to the internal buffer and, once enough audio has
 // accumulated, runs whisper to determine if the audio is speech or music.
-func (c *WhisperClassifier) Classify(samples []float32) Classification {
+//
+// WHY Raw == Debounced: The whisper classifier has no debounce by design.
+// Whisper's output is already high quality -- a single chunk of real text
+// is strong evidence of speech. This allows catching short DJ breaks that
+// DSP classifiers miss due to debounce lag.
+func (c *WhisperClassifier) Classify(samples []float32) ClassifyResult {
 	c.buffer = append(c.buffer, samples...)
 
 	if len(c.buffer) < c.bufferMin {
-		return c.lastClass
+		return ClassifyResult{Raw: c.lastClass, Debounced: c.lastClass}
 	}
 
 	// Run whisper on accumulated buffer.
@@ -59,7 +64,7 @@ func (c *WhisperClassifier) Classify(samples []float32) Classification {
 
 	if err != nil {
 		log.Printf("whisper-classifier: inference error: %v", err)
-		return c.lastClass
+		return ClassifyResult{Raw: c.lastClass, Debounced: c.lastClass}
 	}
 
 	if c.Debug {
@@ -72,13 +77,13 @@ func (c *WhisperClassifier) Classify(samples []float32) Classification {
 	if text == "" {
 		c.lastClass = ClassSilence
 		c.lastText = ""
-		return c.lastClass
+		return ClassifyResult{Raw: c.lastClass, Debounced: c.lastClass}
 	}
 
 	if isWhisperMusicOutput(text) {
 		c.lastClass = ClassMusic
 		c.lastText = ""
-		return c.lastClass
+		return ClassifyResult{Raw: c.lastClass, Debounced: c.lastClass}
 	}
 
 	// WHY 0.3 not 0.4: The hallucination filter in whisper.go uses 0.4 for
@@ -91,13 +96,13 @@ func (c *WhisperClassifier) Classify(samples []float32) Classification {
 		}
 		c.lastClass = ClassMusic
 		c.lastText = ""
-		return c.lastClass
+		return ClassifyResult{Raw: c.lastClass, Debounced: c.lastClass}
 	}
 
 	// Real words with decent confidence -> speech.
 	c.lastClass = ClassSpeech
 	c.lastText = text
-	return c.lastClass
+	return ClassifyResult{Raw: c.lastClass, Debounced: c.lastClass}
 }
 
 // Name returns the classifier tier name.

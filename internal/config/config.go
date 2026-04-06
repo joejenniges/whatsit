@@ -24,6 +24,7 @@ type Config struct {
 	ClassifierDebug bool   `yaml:"classifier_debug"` // log raw feature values
 	WindowSizeSecs  int    `yaml:"window_size_secs"` // rolling window size, default: 10
 	WindowStepSecs  int    `yaml:"window_step_secs"` // rolling window step, default: 3
+	SaveAudio       bool   `yaml:"save_audio"`       // save pre-resampled stereo audio to WAV
 }
 
 // DefaultConfig returns a Config populated with default values.

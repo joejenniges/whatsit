@@ -72,21 +72,25 @@ func TestWhisperClassifierBuffering(t *testing.T) {
 
 	// Feed less than 4 seconds (64000 samples) -- should not trigger inference.
 	short := make([]float32, 32000) // 2 seconds
-	class := c.Classify(short)
+	result := c.Classify(short)
 	if callCount != 0 {
 		t.Errorf("expected no inference call with 2s of audio, got %d calls", callCount)
 	}
-	if class != ClassMusic {
-		t.Errorf("expected default ClassMusic before first inference, got %s", class)
+	if result.Debounced != ClassMusic {
+		t.Errorf("expected default ClassMusic before first inference, got %s", result.Debounced)
 	}
 
 	// Feed another 2 seconds -- now at 4s, should trigger.
-	class = c.Classify(short)
+	result = c.Classify(short)
 	if callCount != 1 {
 		t.Errorf("expected 1 inference call after 4s of audio, got %d", callCount)
 	}
-	if class != ClassSpeech {
-		t.Errorf("expected ClassSpeech for real text with high prob, got %s", class)
+	if result.Debounced != ClassSpeech {
+		t.Errorf("expected ClassSpeech for real text with high prob, got %s", result.Debounced)
+	}
+	// WHY: whisper has no debounce, so Raw == Debounced always.
+	if result.Raw != result.Debounced {
+		t.Errorf("whisper classifier should have Raw == Debounced, got Raw=%s Debounced=%s", result.Raw, result.Debounced)
 	}
 	if c.LastText() != "Hello this is a test broadcast" {
 		t.Errorf("expected LastText to be set, got %q", c.LastText())
@@ -102,9 +106,9 @@ func TestWhisperClassifierMusicResult(t *testing.T) {
 
 	// Feed enough audio to trigger inference.
 	chunk := make([]float32, 64000)
-	class := c.Classify(chunk)
-	if class != ClassMusic {
-		t.Errorf("expected ClassMusic for [Music] output, got %s", class)
+	result := c.Classify(chunk)
+	if result.Debounced != ClassMusic {
+		t.Errorf("expected ClassMusic for [Music] output, got %s", result.Debounced)
 	}
 	if c.LastText() != "" {
 		t.Errorf("expected empty LastText for music, got %q", c.LastText())
@@ -119,9 +123,9 @@ func TestWhisperClassifierLowConfidence(t *testing.T) {
 	c := NewWhisperClassifier(mockClassify)
 
 	chunk := make([]float32, 64000)
-	class := c.Classify(chunk)
-	if class != ClassMusic {
-		t.Errorf("expected ClassMusic for low confidence, got %s", class)
+	result := c.Classify(chunk)
+	if result.Debounced != ClassMusic {
+		t.Errorf("expected ClassMusic for low confidence, got %s", result.Debounced)
 	}
 }
 
@@ -133,8 +137,8 @@ func TestWhisperClassifierSilence(t *testing.T) {
 	c := NewWhisperClassifier(mockClassify)
 
 	chunk := make([]float32, 64000)
-	class := c.Classify(chunk)
-	if class != ClassSilence {
-		t.Errorf("expected ClassSilence for empty text, got %s", class)
+	result := c.Classify(chunk)
+	if result.Debounced != ClassSilence {
+		t.Errorf("expected ClassSilence for empty text, got %s", result.Debounced)
 	}
 }

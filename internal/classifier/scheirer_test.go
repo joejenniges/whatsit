@@ -152,18 +152,21 @@ func TestScheirerClassifier_Debounce(t *testing.T) {
 	// The classifier starts at ClassSilence.
 	// Feed speech signals: should not switch until debounce count met.
 
-	// Calls 1-4: should still be silence (debouncing).
+	// Calls 1-4: debounced should still be silence, but raw should be speech.
 	for i := 1; i <= 4; i++ {
 		r := c.Classify(speechSamples)
-		if r != ClassSilence {
-			t.Errorf("debounce call %d: expected ClassSilence (still debouncing), got %s", i, r)
+		if r.Debounced != ClassSilence {
+			t.Errorf("debounce call %d: expected Debounced=ClassSilence (still debouncing), got %s", i, r.Debounced)
+		}
+		if r.Raw == ClassSilence {
+			t.Errorf("debounce call %d: expected Raw != ClassSilence, got %s", i, r.Raw)
 		}
 	}
 
 	// Call 5: should switch.
 	r := c.Classify(speechSamples)
-	if r == ClassSilence {
-		t.Errorf("debounce call 5: expected non-silence after 5 consecutive, got %s", r)
+	if r.Debounced == ClassSilence {
+		t.Errorf("debounce call 5: expected Debounced non-silence after 5 consecutive, got %s", r.Debounced)
 	}
 }
 
@@ -173,8 +176,8 @@ func TestScheirerClassifier_SilenceImmediate(t *testing.T) {
 	// Silence should transition immediately regardless of debounce.
 	silence := make([]float32, 32000)
 	r := c.Classify(silence)
-	if r != ClassSilence {
-		t.Errorf("expected ClassSilence for silent input, got %s", r)
+	if r.Debounced != ClassSilence {
+		t.Errorf("expected ClassSilence for silent input, got %s", r.Debounced)
 	}
 }
 
@@ -189,8 +192,8 @@ func TestScheirerClassifier_SteadyToneIsMusic(t *testing.T) {
 	}
 
 	r := c.Classify(samples)
-	if r != ClassMusic {
-		t.Errorf("expected ClassMusic for steady tone, got %s", r)
+	if r.Debounced != ClassMusic {
+		t.Errorf("expected ClassMusic for steady tone, got %s", r.Debounced)
 	}
 }
 

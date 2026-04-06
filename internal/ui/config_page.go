@@ -25,6 +25,7 @@ type ConfigPage struct {
 	modelSizeSelect     *widget.Select
 	modelSizeWarning    *widget.Label
 	classifierSelect    *widget.Select
+	saveAudioCheck      *widget.Check
 	acoustIDEntry       *widget.Entry
 	languageSelect      *widget.Select
 	bufferSecsEntry     *widget.Entry
@@ -83,6 +84,10 @@ func NewConfigPage(cfg *config.Config, onSave func(*config.Config)) *ConfigPage 
 		cp.classifierSelect.SetSelected("scheirer")
 	}
 
+	// Save Audio checkbox
+	cp.saveAudioCheck = widget.NewCheck("Save original stereo audio to WAV files", nil)
+	cp.saveAudioCheck.SetChecked(cfg.SaveAudio)
+
 	// AcoustID API Key
 	cp.acoustIDEntry = widget.NewEntry()
 	cp.acoustIDEntry.SetPlaceHolder("AcoustID API key (optional)")
@@ -140,6 +145,7 @@ func NewConfigPage(cfg *config.Config, onSave func(*config.Config)) *ConfigPage 
 		widget.NewLabel("Stream URL"), cp.streamURLEntry,
 		widget.NewLabel("Whisper Model"), container.NewVBox(cp.modelSizeSelect, cp.modelSizeWarning),
 		widget.NewLabel("Classifier Tier"), cp.classifierSelect,
+		widget.NewLabel("Save Audio"), cp.saveAudioCheck,
 		widget.NewLabel("AcoustID Key"), cp.acoustIDEntry,
 		widget.NewLabel("Language"), cp.languageSelect,
 		widget.NewLabel("Buffer (seconds)"), cp.bufferSecsEntry,
@@ -191,6 +197,7 @@ func (cp *ConfigPage) handleSave() {
 	cp.cfg.StreamURL = cp.streamURLEntry.Text
 	cp.cfg.ModelSize = cp.modelSizeSelect.Selected
 	cp.cfg.ClassifierTier = cp.classifierSelect.Selected
+	cp.cfg.SaveAudio = cp.saveAudioCheck.Checked
 	cp.cfg.AcoustIDKey = cp.acoustIDEntry.Text
 	cp.cfg.Language = cp.languageSelect.Selected
 	cp.cfg.BufferSecs = bufSecs

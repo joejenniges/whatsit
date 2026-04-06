@@ -140,7 +140,10 @@ func (o *Orchestrator) Start() {
 
 // finishInit loads the whisper model, sets up callbacks, and switches to the main screen.
 func (o *Orchestrator) finishInit(modelPath string) {
-	// Initialize audio segment recorder and clean up old files.
+	// Set up audio directory and clean up old files.
+	// WHY recorder is NOT initialized here: We need the decoder's actual sample
+	// rate (e.g. 48kHz) to save pre-resampled stereo audio. The recorder is
+	// created in startStreaming after the decoder reports the stream sample rate.
 	appDir, err := config.AppDir()
 	if err != nil {
 		log.Fatalf("app: resolve app directory: %v", err)
@@ -149,7 +152,6 @@ func (o *Orchestrator) finishInit(modelPath string) {
 	if err := os.MkdirAll(audioDir, 0o755); err != nil {
 		log.Fatalf("app: create audio directory: %v", err)
 	}
-	o.recorder = audio.NewSegmentRecorder(audioDir, whisperSampleRate)
 
 	// Clean up audio files older than 24 hours in the background.
 	go audio.CleanupOldAudio(audioDir, 24*time.Hour)
@@ -273,6 +275,16 @@ func (o *Orchestrator) startStreaming() {
 	inputRate := o.decoder.SampleRate()
 	log.Printf("app: stream sample rate: %d Hz", inputRate)
 
+	// WHY recorder init here (not in finishInit): We need the decoder's actual
+	// sample rate to save pre-resampled stereo int16 audio that sounds good.
+	// The old approach saved 16kHz mono float32 which was unusable for music.
+	appDir, appDirErr := config.AppDir()
+	if appDirErr != nil {
+		log.Printf("app: resolve app directory for recorder: %v", appDirErr)
+	}
+	audioDir := filepath.Join(appDir, "audio")
+	o.recorder = audio.NewSegmentRecorder(audioDir, inputRate, 2, o.config.SaveAudio)
+
 	// Initialize the audio listener for speaker output. Non-fatal if it fails
 	// (e.g., no audio output device). Starts disabled -- user toggles it on.
 	listener, listenErr := audio.NewListener(inputRate, 2)
@@ -283,9 +295,8 @@ func (o *Orchestrator) startStreaming() {
 	}
 
 	// WHY tee channel: The decoder outputs stereo int16. We need to feed those
-	// samples to both the resampler (for transcription) and the listener (for
-	// playback). A simple goroutine copies each chunk to the listener and
-	// forwards it to the resampler's input channel.
+	// samples to the listener (playback), the recorder (WAV saving), and the
+	// resampler (for transcription). A goroutine fans out each chunk.
 	resamplerInput := make(chan []int16, 32)
 	go func() {
 		defer func() {
@@ -298,6 +309,10 @@ func (o *Orchestrator) startStreaming() {
 			// Feed to listener (no-op if disabled or nil).
 			if o.listener != nil {
 				o.listener.Write(samples)
+			}
+			// Feed to recorder (no-op if disabled or no active segment).
+			if o.recorder != nil {
+				o.recorder.WriteInt16(samples)
 			}
 			// Forward to resampler.
 			select {
@@ -322,7 +337,24 @@ func (o *Orchestrator) startStreaming() {
 	go o.processingLoop()
 }
 
-// processingLoop reads resampled audio chunks and routes them based on classification.
+// pendingChunk holds audio that was buffered during a classifier state
+// transition. We store the raw classification so we can process each chunk
+// according to what it actually sounded like, not what the debounce said.
+type pendingChunk struct {
+	samples  []float32
+	rawClass classifier.Classification
+}
+
+// processingLoop reads resampled audio chunks and routes them based on
+// classification. Uses a transition buffer to avoid losing audio when the
+// debounce hasn't confirmed a state change yet.
+//
+// WHY the buffer: With debounce_chunks=5 and 2-second chunks, the classifier
+// needs 10 seconds of consistent classification before switching. A 5-second
+// DJ break between songs only produces 2-3 speech chunks -- not enough to
+// flip the debounce. Without buffering, those speech chunks get silently
+// classified as "music" and discarded. The buffer captures them and processes
+// them by their raw classification once the transition resolves.
 func (o *Orchestrator) processingLoop() {
 	defer func() {
 		if r := recover(); r != nil {
@@ -331,122 +363,181 @@ func (o *Orchestrator) processingLoop() {
 		}
 	}()
 
-	var lastClass classifier.Classification
+	var currentState classifier.Classification = classifier.ClassSilence
+	var pending []pendingChunk
 	var silenceSamples int
 
 	for chunk := range o.resampler.Output() {
-		class := o.classifier.Classify(chunk)
+		result := o.classifier.Classify(chunk)
 
-		switch class {
-		case classifier.ClassSpeech:
-			// Transitioning from music -> speech: flush music buffer,
-			// end the music segment, and reset the transcriber.
-			if lastClass == classifier.ClassMusic {
-				o.endRecorderSegment()
-				o.flushMusicBuffer()
-				o.transcriber.Reset()
-				o.ui.ClearMusicMarker()
+		if result.Debounced != currentState && currentState != "" {
+			// State transition confirmed by debounce.
+			// The pending chunks were the start of this new content --
+			// process them by their raw classification so nothing is lost.
+			o.handleTransition(currentState, result.Debounced)
+			for _, pc := range pending {
+				o.processChunkAs(pc.rawClass, pc.samples)
 			}
-
-			// Start a speech segment if not already recording one.
-			if _, err := o.recorder.StartSegment("speech"); err != nil {
-				log.Printf("app: start speech segment: %v", err)
-			}
+			pending = nil
+			currentState = result.Debounced
+			o.processChunkAs(result.Debounced, chunk)
 			silenceSamples = 0
 
-			// Record audio to WAV.
-			if err := o.recorder.Write(chunk); err != nil {
-				log.Printf("app: write speech audio: %v", err)
-			}
+		} else if result.Raw != result.Debounced {
+			// Raw differs from debounced -- we're mid-transition.
+			// Buffer the chunk with its raw classification instead of
+			// routing it through the debounced (possibly wrong) state.
+			pending = append(pending, pendingChunk{chunk, result.Raw})
 
-			// WHY two paths: The whisper classifier already ran inference
-			// to classify the audio, so it has the transcription text.
-			// Re-transcribing through the rolling window would waste CPU.
-			// Non-whisper classifiers use DSP features, so they still need
-			// the rolling window for transcription.
-			if wc, ok := o.classifier.(*classifier.WhisperClassifier); ok {
-				if text := wc.LastText(); text != "" {
-					now := time.Now()
-					entry := &storage.LogEntry{
-						Timestamp: now,
-						EntryType: "speech",
-						Content:   text,
-						AudioPath: o.recorder.CurrentPath(),
-					}
-					if dbErr := o.db.InsertEntry(entry); dbErr != nil {
-						log.Printf("app: insert speech entry: %v", dbErr)
-					}
-					o.ui.AppendTranscription(now, text)
+			// Safety cap: don't buffer more than ~30 seconds of audio.
+			// If we hit this, something is oscillating without committing.
+			// Flush by raw class so nothing is permanently lost.
+			if len(pending) > 15 {
+				for _, pc := range pending {
+					o.processChunkAs(pc.rawClass, pc.samples)
 				}
-			} else {
-				// Non-whisper classifier: feed to rolling window as before.
-				text, triggered, err := o.transcriber.FeedChunk(chunk)
-				if err != nil {
-					log.Printf("app: transcribe: %v", err)
-				} else if triggered && text != "" {
-					now := time.Now()
-					entry := &storage.LogEntry{
-						Timestamp: now,
-						EntryType: "speech",
-						Content:   text,
-						AudioPath: o.recorder.CurrentPath(),
-					}
-					if dbErr := o.db.InsertEntry(entry); dbErr != nil {
-						log.Printf("app: insert speech entry: %v", dbErr)
-					}
-					o.ui.AppendTranscription(now, text)
+				pending = nil
+			}
+
+		} else {
+			// Stable state: Raw == Debounced == currentState.
+			// If we have pending chunks from a brief blip that didn't flip
+			// the debounce, process them by their raw classification.
+			// This is the key path for short DJ breaks: 2-3 speech chunks
+			// get buffered, music resumes, and they flush here as speech.
+			if len(pending) > 0 {
+				for _, pc := range pending {
+					o.processChunkAs(pc.rawClass, pc.samples)
 				}
+				pending = nil
 			}
+			currentState = result.Debounced
+			o.processChunkAs(result.Debounced, chunk)
+		}
 
-		case classifier.ClassMusic:
-			// Transitioning from speech -> music: end the speech segment,
-			// reset transcriber window, show "Music playing" marker.
-			if lastClass == classifier.ClassSpeech {
-				o.endRecorderSegment()
-				o.transcriber.Reset()
-				o.ui.AppendMusic() // Shows once; subsequent calls are no-ops.
-			}
-
-			// Start a music segment if not already recording one.
-			if _, err := o.recorder.StartSegment("music"); err != nil {
-				log.Printf("app: start music segment: %v", err)
-			}
-			silenceSamples = 0
-
-			// Record audio to WAV.
-			if err := o.recorder.Write(chunk); err != nil {
-				log.Printf("app: write music audio: %v", err)
-			}
-
-			o.musicBuffer.Write(chunk)
-
-			if o.musicBuffer.Duration(whisperSampleRate) >= 15*time.Second {
-				go o.identifyMusic()
-			}
-
-		case classifier.ClassSilence:
+		// Track silence for long-silence flush.
+		if result.Raw == classifier.ClassSilence {
 			silenceSamples += len(chunk)
-			// Flush on long silence (>5s).
 			if silenceSamples > whisperSampleRate*5 {
 				o.endRecorderSegment()
 				o.transcriber.Reset()
 				o.flushMusicBuffer()
 				silenceSamples = 0
 			}
+		} else {
+			silenceSamples = 0
 		}
 
-		if class != classifier.ClassSilence {
-			lastClass = class
-		}
-
-		o.ui.UpdateStatus(true, string(class))
+		// Show raw classification in the UI for responsiveness --
+		// the user sees what the audio actually sounds like, not the
+		// debounced state which lags behind.
+		o.ui.UpdateStatus(true, string(result.Raw))
 	}
 
 	// Channel closed -- streamer/decoder/resampler pipeline ended.
+	// Flush any remaining pending chunks.
+	for _, pc := range pending {
+		o.processChunkAs(pc.rawClass, pc.samples)
+	}
 	o.endRecorderSegment()
 	o.transcriber.Reset()
 	o.flushMusicBuffer()
 	o.ui.UpdateStatus(false, "disconnected")
+}
+
+// handleTransition performs cleanup when the debounce confirms a state change.
+// This is where segments end/begin and the transcriber resets.
+func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
+	o.endRecorderSegment()
+
+	if from == classifier.ClassMusic && to == classifier.ClassSpeech {
+		o.flushMusicBuffer()
+		o.transcriber.Reset()
+		o.ui.ClearMusicMarker()
+	}
+
+	if from == classifier.ClassSpeech && to == classifier.ClassMusic {
+		o.transcriber.Reset()
+		o.ui.AppendMusic()
+	}
+
+	if from == classifier.ClassSpeech && to == classifier.ClassSilence {
+		o.transcriber.Reset()
+	}
+
+	if from == classifier.ClassMusic && to == classifier.ClassSilence {
+		o.flushMusicBuffer()
+	}
+}
+
+// processChunkAs routes a single audio chunk to the appropriate handler
+// based on the given classification. This is the unified processing path
+// used for both live chunks and buffered pending chunks.
+func (o *Orchestrator) processChunkAs(class classifier.Classification, chunk []float32) {
+	switch class {
+	case classifier.ClassSpeech:
+		// Start a speech segment if not already recording one.
+		if _, err := o.recorder.StartSegment("speech"); err != nil {
+			log.Printf("app: start speech segment: %v", err)
+		}
+
+		// WHY no Write call here: The tee goroutine feeds pre-resampled
+		// stereo int16 samples to the recorder via WriteInt16. This loop
+		// only manages segment start/end transitions based on classification.
+
+		// WHY two paths: The whisper classifier already ran inference
+		// to classify the audio, so it has the transcription text.
+		// Re-transcribing through the rolling window would waste CPU.
+		// Non-whisper classifiers use DSP features, so they still need
+		// the rolling window for transcription.
+		if wc, ok := o.classifier.(*classifier.WhisperClassifier); ok {
+			if text := wc.LastText(); text != "" {
+				now := time.Now()
+				entry := &storage.LogEntry{
+					Timestamp: now,
+					EntryType: "speech",
+					Content:   text,
+					AudioPath: o.recorder.CurrentPath(),
+				}
+				if dbErr := o.db.InsertEntry(entry); dbErr != nil {
+					log.Printf("app: insert speech entry: %v", dbErr)
+				}
+				o.ui.AppendTranscription(now, text)
+			}
+		} else {
+			text, triggered, err := o.transcriber.FeedChunk(chunk)
+			if err != nil {
+				log.Printf("app: transcribe: %v", err)
+			} else if triggered && text != "" {
+				now := time.Now()
+				entry := &storage.LogEntry{
+					Timestamp: now,
+					EntryType: "speech",
+					Content:   text,
+					AudioPath: o.recorder.CurrentPath(),
+				}
+				if dbErr := o.db.InsertEntry(entry); dbErr != nil {
+					log.Printf("app: insert speech entry: %v", dbErr)
+				}
+				o.ui.AppendTranscription(now, text)
+			}
+		}
+
+	case classifier.ClassMusic:
+		// Start a music segment if not already recording one.
+		if _, err := o.recorder.StartSegment("music"); err != nil {
+			log.Printf("app: start music segment: %v", err)
+		}
+
+		o.musicBuffer.Write(chunk)
+
+		if o.musicBuffer.Duration(whisperSampleRate) >= 15*time.Second {
+			go o.identifyMusic()
+		}
+
+	case classifier.ClassSilence:
+		// Don't feed silence to transcriber or music buffer.
+	}
 }
 
 // flushMusicBuffer identifies whatever is in the music buffer.
