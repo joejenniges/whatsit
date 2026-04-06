@@ -96,6 +96,79 @@ func defaultDownloadURL(ctx context.Context, url string) (*http.Response, error)
 	return http.DefaultClient.Do(req)
 }
 
+// --- Parakeet model download ---
+
+const parakeetHFBase = "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main"
+
+// parakeetFiles lists the files needed for the Parakeet CTC model.
+// WHY model.onnx + model.onnx.data: The ONNX model is split into a small
+// graph file and a large external data file. Both are required.
+var parakeetFiles = []struct {
+	name string
+	url  string
+}{
+	{"model.onnx", parakeetHFBase + "/model.onnx"},
+	{"model.onnx.data", parakeetHFBase + "/model.onnx.data"},
+	{"vocab.txt", parakeetHFBase + "/vocab.txt"},
+}
+
+// ParakeetModelInfo returns expected file paths for the Parakeet model.
+func ParakeetModelInfo(modelsDir string) (modelPath, vocabPath string) {
+	dir := filepath.Join(modelsDir, "parakeet-ctc-0.6b")
+	return filepath.Join(dir, "model.onnx"), filepath.Join(dir, "vocab.txt")
+}
+
+// EnsureParakeetModel checks if all Parakeet model files exist.
+func EnsureParakeetModel(modelsDir string) (bool, string, string, error) {
+	dir := filepath.Join(modelsDir, "parakeet-ctc-0.6b")
+	modelPath := filepath.Join(dir, "model.onnx")
+	vocabPath := filepath.Join(dir, "vocab.txt")
+
+	for _, f := range parakeetFiles {
+		p := filepath.Join(dir, f.name)
+		info, err := os.Stat(p)
+		if err != nil || info.Size() == 0 {
+			return false, modelPath, vocabPath, nil
+		}
+	}
+	return true, modelPath, vocabPath, nil
+}
+
+// DownloadParakeetModel downloads all Parakeet model files with progress.
+// Progress reports cumulative bytes across all files.
+func DownloadParakeetModel(ctx context.Context, modelsDir string, progress DownloadProgress) (modelPath, vocabPath string, err error) {
+	dir := filepath.Join(modelsDir, "parakeet-ctc-0.6b")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", "", fmt.Errorf("create parakeet model directory: %w", err)
+	}
+
+	modelPath = filepath.Join(dir, "model.onnx")
+	vocabPath = filepath.Join(dir, "vocab.txt")
+
+	for _, f := range parakeetFiles {
+		filePath := filepath.Join(dir, f.name)
+		tmpPath := filePath + ".tmp"
+
+		// Skip if already downloaded.
+		if info, statErr := os.Stat(filePath); statErr == nil && info.Size() > 0 {
+			continue
+		}
+
+		success := false
+		defer func(tmp string) {
+			if !success {
+				os.Remove(tmp)
+			}
+		}(tmpPath)
+
+		if dlErr := downloadTo(ctx, f.url, filePath, tmpPath, progress, &success); dlErr != nil {
+			return "", "", fmt.Errorf("download %s: %w", f.name, dlErr)
+		}
+	}
+
+	return modelPath, vocabPath, nil
+}
+
 func downloadTo(ctx context.Context, url, filePath, tmpPath string, progress DownloadProgress, success *bool) error {
 	resp, err := downloadURL(ctx, url)
 	if err != nil {

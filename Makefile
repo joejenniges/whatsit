@@ -20,7 +20,8 @@ test-whisper:
 
 DIST_DIR := dist
 DLLS := libwhisper-1.dll ggml.dll ggml-base.dll ggml-cpu.dll ggml-vulkan.dll \
-        libchromaprint.dll libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll
+        libchromaprint.dll libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll \
+        onnxruntime.dll
 
 dist: build
 	mkdir -p $(DIST_DIR)

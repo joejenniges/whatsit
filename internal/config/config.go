@@ -27,6 +27,7 @@ type Config struct {
 	WindowStepSecs    int    `yaml:"window_step_secs"`   // rolling window step, default: 3
 	SaveAudio         bool   `yaml:"save_audio"`         // save pre-resampled stereo audio to WAV
 	UseGPU            bool   `yaml:"use_gpu"`            // attempt Vulkan GPU acceleration for whisper
+	ASREngine         string `yaml:"asr_engine"`         // "whisper" or "parakeet"
 }
 
 // DefaultConfig returns a Config populated with default values.

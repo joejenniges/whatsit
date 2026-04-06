@@ -104,48 +104,83 @@ func (o *Orchestrator) Start() {
 		log.Fatalf("app: open database: %v", err)
 	}
 
-	// Check whisper model.
 	modelsDir := filepath.Join(appDir, "models")
-	modelSize := o.config.ModelSize
-	if modelSize == "" {
-		modelSize = "base"
-	}
 
-	exists, modelPath, err := transcriber.EnsureModel(modelsDir, modelSize)
-	if err != nil {
-		log.Fatalf("app: check model: %v", err)
-	}
+	if o.config.ASREngine == "parakeet" {
+		// Parakeet ONNX model.
+		exists, modelPath, vocabPath, err := transcriber.EnsureParakeetModel(modelsDir)
+		if err != nil {
+			log.Fatalf("app: check parakeet model: %v", err)
+		}
 
-	if !exists {
-		o.ui.ShowDownloadScreen(modelsDir, modelSize)
-		o.ui.SetCallbacks(nil, nil, nil)
+		if !exists {
+			o.ui.ShowDownloadScreen(modelsDir, "parakeet-ctc-0.6b")
+			o.ui.SetCallbacks(nil, nil, nil)
 
-		// Download in background so the UI can render the progress screen.
-		// WHY goroutine: UI.Run() blocks on the Fyne event loop, and download
-		// needs to happen concurrently. We start the download, then fall through
-		// to Run(). The download goroutine calls ShowMainScreen when done.
-		go func() {
-			dlPath, dlErr := transcriber.DownloadModel(
-				context.Background(), modelsDir, modelSize,
-				func(downloaded, total int64) {
-					o.ui.UpdateDownloadProgress(downloaded, total)
-				},
-			)
-			if dlErr != nil {
-				log.Fatalf("app: download model: %v", dlErr)
-			}
-			modelPath = dlPath
-			o.finishInit(modelPath)
-		}()
+			go func() {
+				dlModel, dlVocab, dlErr := transcriber.DownloadParakeetModel(
+					context.Background(), modelsDir,
+					func(downloaded, total int64) {
+						o.ui.UpdateDownloadProgress(downloaded, total)
+					},
+				)
+				if dlErr != nil {
+					log.Fatalf("app: download parakeet model: %v", dlErr)
+				}
+				o.finishInitParakeet(dlModel, dlVocab)
+			}()
 
+			o.ui.Run()
+			o.shutdown()
+			return
+		}
+
+		o.finishInitParakeet(modelPath, vocabPath)
+		o.ui.Run()
+		o.shutdown()
+	} else {
+		// Whisper model (default).
+		modelSize := o.config.ModelSize
+		if modelSize == "" {
+			modelSize = "base"
+		}
+
+		exists, modelPath, err := transcriber.EnsureModel(modelsDir, modelSize)
+		if err != nil {
+			log.Fatalf("app: check model: %v", err)
+		}
+
+		if !exists {
+			o.ui.ShowDownloadScreen(modelsDir, modelSize)
+			o.ui.SetCallbacks(nil, nil, nil)
+
+			// Download in background so the UI can render the progress screen.
+			// WHY goroutine: UI.Run() blocks on the Fyne event loop, and download
+			// needs to happen concurrently. We start the download, then fall through
+			// to Run(). The download goroutine calls ShowMainScreen when done.
+			go func() {
+				dlPath, dlErr := transcriber.DownloadModel(
+					context.Background(), modelsDir, modelSize,
+					func(downloaded, total int64) {
+						o.ui.UpdateDownloadProgress(downloaded, total)
+					},
+				)
+				if dlErr != nil {
+					log.Fatalf("app: download model: %v", dlErr)
+				}
+				modelPath = dlPath
+				o.finishInit(modelPath)
+			}()
+
+			o.ui.Run() // blocks
+			o.shutdown()
+			return
+		}
+
+		o.finishInit(modelPath)
 		o.ui.Run() // blocks
 		o.shutdown()
-		return
 	}
-
-	o.finishInit(modelPath)
-	o.ui.Run() // blocks
-	o.shutdown()
 }
 
 // finishInit loads the whisper model, sets up callbacks, and switches to the main screen.
@@ -276,6 +311,110 @@ func (o *Orchestrator) finishInit(modelPath string) {
 	} else if !o.config.UseGPU {
 		o.ui.ShowGPUWarning("GPU acceleration disabled in settings -- using CPU.")
 	}
+}
+
+// finishInitParakeet loads the Parakeet ONNX model and sets up callbacks.
+// Mirrors finishInit but creates a ParakeetEngine instead of whisper Transcriber.
+func (o *Orchestrator) finishInitParakeet(modelPath, vocabPath string) {
+	appDir, err := config.AppDir()
+	if err != nil {
+		log.Fatalf("app: resolve app directory: %v", err)
+	}
+	audioDir := filepath.Join(appDir, "audio")
+	if err := os.MkdirAll(audioDir, 0o755); err != nil {
+		log.Fatalf("app: create audio directory: %v", err)
+	}
+
+	go audio.CleanupOldAudio(audioDir, 24*time.Hour)
+
+	windowSize := o.config.WindowSizeSecs * whisperSampleRate
+	windowStep := o.config.WindowStepSecs * whisperSampleRate
+
+	t, err := transcriber.NewParakeetEngine(transcriber.ParakeetConfig{
+		ModelPath:  modelPath,
+		VocabPath:  vocabPath,
+		WindowSize: windowSize,
+		WindowStep: windowStep,
+	})
+	if err != nil {
+		log.Fatalf("app: init parakeet engine: %v", err)
+	}
+	o.transcriber = t
+
+	// Fingerprinter + AcoustID (same as finishInit).
+	fp, fpErr := musicid.NewFingerprinter()
+	if fpErr != nil {
+		log.Printf("app: fingerprinter unavailable, music ID disabled: %v", fpErr)
+	} else {
+		o.fingerprinter = fp
+	}
+
+	if o.config.AcoustIDKey != "" {
+		client, clientErr := musicid.NewAcoustIDClient(o.config.AcoustIDKey)
+		if clientErr != nil {
+			log.Printf("app: acoustid client init failed: %v", clientErr)
+		} else {
+			o.acoustidClient = client
+			log.Printf("app: acoustid client initialized")
+		}
+	}
+
+	tier := o.config.ClassifierTier
+	if tier == "" {
+		tier = "scheirer"
+	}
+	if tier == "whisper" {
+		wc := classifier.NewWhisperClassifier(func(samples []float32) (string, float32, error) {
+			return o.transcriber.ClassifyChunk(samples)
+		})
+		wc.Debug = o.config.ClassifierDebug
+		o.classifier = wc
+	} else {
+		o.classifier = classifier.NewClassifier(tier, whisperSampleRate, o.config.ClassifierDebug)
+	}
+	log.Printf("app: classifier tier: %s (%s)", tier, o.classifier.Name())
+
+	o.ui.SetCallbacks(
+		func() { o.startStreaming() },
+		func() { o.stopStreaming() },
+		func(cfg *config.Config) {
+			o.config = cfg
+			if saveErr := config.Save(cfg); saveErr != nil {
+				log.Printf("app: save config: %v", saveErr)
+			}
+		},
+	)
+
+	o.ui.SetListenCallback(func(enabled bool) {
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		if o.listener != nil {
+			o.listener.SetEnabled(enabled)
+		}
+	})
+
+	o.ui.SetLoadHistoryCallback(func(limit int) ([]storage.LogEntry, error) {
+		return o.db.GetRecentEntries(limit)
+	})
+
+	o.ui.SetEditSongCallback(func(id int64, title, artist string) error {
+		return o.db.UpdateEntrySong(id, title, artist)
+	})
+
+	o.ui.SetInsertSongCallback(func() (*storage.LogEntry, error) {
+		entry := &storage.LogEntry{
+			Timestamp: time.Now(),
+			EntryType: "song",
+			Content:   "Song played",
+		}
+		if err := o.db.InsertEntry(entry); err != nil {
+			return nil, err
+		}
+		return entry, nil
+	})
+
+	o.ui.ShowMainScreen()
+	log.Printf("app: parakeet engine ready")
 }
 
 // startStreaming sets up the audio pipeline and begins the processing loop.

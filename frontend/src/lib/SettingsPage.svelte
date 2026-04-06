@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
 
   let streamUrl = $state('');
+  let asrEngine = $state('whisper');
   let modelSize = $state('base');
   let classifierTier = $state('basic');
   let transcriptionMode = $state('segment');
@@ -20,6 +21,7 @@
       const { GetConfig } = await import('../../wailsjs/go/main/App');
       const cfg = await GetConfig();
       streamUrl = cfg.StreamURL || '';
+      asrEngine = cfg.ASREngine || 'whisper';
       modelSize = cfg.ModelSize || 'base';
       classifierTier = cfg.ClassifierTier || 'basic';
       transcriptionMode = cfg.TranscriptionMode || 'segment';
@@ -42,6 +44,7 @@
       const { SaveConfig } = await import('../../wailsjs/go/main/App');
       await SaveConfig({
         StreamURL: streamUrl,
+        ASREngine: asrEngine,
         ModelSize: modelSize,
         ModelPath: '',
         AcoustIDKey: acoustIdKey,
@@ -75,8 +78,16 @@
 
   <div class="form-row">
     <div class="form-group">
+      <label for="asr-engine">ASR Engine</label>
+      <select id="asr-engine" bind:value={asrEngine}>
+        <option value="whisper">Whisper</option>
+        <option value="parakeet">Parakeet CTC (ONNX)</option>
+      </select>
+    </div>
+
+    <div class="form-group">
       <label for="model-size">Whisper Model</label>
-      <select id="model-size" bind:value={modelSize}>
+      <select id="model-size" bind:value={modelSize} disabled={asrEngine !== 'whisper'}>
         <option value="tiny">tiny</option>
         <option value="base">base</option>
         <option value="small">small</option>
