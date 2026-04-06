@@ -19,7 +19,7 @@ test-whisper:
 	CGO_ENABLED=1 go test -tags whisper -v ./internal/transcriber/
 
 DIST_DIR := dist
-DLLS := libwhisper-1.dll ggml.dll ggml-base.dll ggml-cpu.dll \
+DLLS := libwhisper-1.dll ggml.dll ggml-base.dll ggml-cpu.dll ggml-vulkan.dll \
         libchromaprint.dll libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll
 
 dist: build

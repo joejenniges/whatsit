@@ -2,10 +2,12 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 )
@@ -20,6 +22,7 @@ type LiveView struct {
 	startBtn   *widget.Button
 	stopBtn    *widget.Button
 	listenBtn  *widget.Check
+	gpuWarning *fyne.Container
 
 	root fyne.CanvasObject
 
@@ -80,6 +83,10 @@ func NewLiveView(onStart, onStop func(), onListen func(enabled bool)) *LiveView 
 	})
 	lv.listenBtn.Disable() // Only enabled while streaming.
 
+	// GPU warning banner -- hidden by default, shown via ShowGPUWarning.
+	lv.gpuWarning = container.NewHBox()
+	lv.gpuWarning.Hide()
+
 	buttons := container.NewHBox(lv.startBtn, lv.stopBtn, lv.listenBtn)
 
 	statusInfo := container.NewHBox(lv.statusLbl, lv.latencyLbl)
@@ -89,8 +96,8 @@ func NewLiveView(onStart, onStop func(), onListen func(enabled bool)) *LiveView 
 	)
 
 	lv.root = container.NewBorder(
-		nil,       // top
-		statusBar, // bottom
+		lv.gpuWarning, // top
+		statusBar,     // bottom
 		nil, nil,
 		lv.scroll, // center (fills remaining space)
 	)
@@ -101,6 +108,22 @@ func NewLiveView(onStart, onStop func(), onListen func(enabled bool)) *LiveView 
 // Container returns the root canvas object for this view.
 func (lv *LiveView) Container() fyne.CanvasObject {
 	return lv.root
+}
+
+// ShowGPUWarning displays a warning banner at the top of the live view.
+// Safe to call from any goroutine.
+func (lv *LiveView) ShowGPUWarning(message string) {
+	warningText := canvas.NewText(message, color.NRGBA{R: 255, G: 140, B: 0, A: 255})
+	warningText.TextStyle = fyne.TextStyle{Bold: true}
+	warningText.TextSize = 12
+
+	fyne.Do(func() {
+		lv.gpuWarning.Objects = []fyne.CanvasObject{
+			container.NewPadded(warningText),
+		}
+		lv.gpuWarning.Show()
+		lv.gpuWarning.Refresh()
+	})
 }
 
 // AppendTranscription adds a timestamped speech transcription line.

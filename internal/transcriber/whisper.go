@@ -23,13 +23,16 @@ package transcriber
 //     return params;
 // }
 //
-// // WHY: Rolling-window mode uses no_context=false so whisper can leverage
-// // earlier audio in the window for better context, and single_segment=false
-// // so it can find natural segment boundaries within the full window.
-// static struct whisper_full_params make_params_rolling(int n_threads, const char *lang) {
+// // WHY: Rolling-window mode uses no_context=true with initial_prompt instead
+// // of no_context=false. With no_context=false, whisper carries forward hidden
+// // state between calls -- if one inference hallucinates, the next one uses that
+// // state and reinforces it, causing hallucination loops. With initial_prompt,
+// // whisper starts fresh each call but gets a text hint about recent speech
+// // (spelling, style, topic) without any hidden-state drift risk.
+// static struct whisper_full_params make_params_rolling(int n_threads, const char *lang, const char *prompt) {
 //     struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
 //     params.n_threads       = n_threads;
-//     params.no_context      = false;
+//     params.no_context      = true;
 //     params.single_segment  = false;
 //     params.print_special   = false;
 //     params.print_progress  = false;
@@ -39,6 +42,7 @@ package transcriber
 //     params.suppress_nst    = true;
 //     params.language        = lang;
 //     params.translate       = false;
+//     params.initial_prompt  = prompt;
 //     return params;
 // }
 import "C"
@@ -58,6 +62,7 @@ type TranscriberConfig struct {
 	Threads    int    // 0 means runtime.NumCPU()
 	WindowSize int    // samples (window_size_secs * 16000), default 160000 (10s)
 	WindowStep int    // samples (window_step_secs * 16000), default 48000 (3s)
+	UseGPU     bool   // whether to attempt Vulkan GPU acceleration
 }
 
 // Transcriber wraps a whisper.cpp context for speech-to-text.
@@ -95,6 +100,11 @@ func NewTranscriber(cfg TranscriberConfig) (*Transcriber, error) {
 	defer C.free(unsafe.Pointer(cPath))
 
 	cparams := C.whisper_context_default_params()
+	// WHY: When UseGPU is false, explicitly disable GPU on the context params
+	// so whisper.cpp doesn't attempt Vulkan even if the DLL happens to be present.
+	if !cfg.UseGPU {
+		cparams.use_gpu = C.bool(false)
+	}
 	ctx := C.whisper_init_from_file_with_params(cPath, cparams)
 	if ctx == nil {
 		return nil, fmt.Errorf("failed to load whisper model from %s", cfg.ModelPath)
@@ -305,7 +315,10 @@ func (t *Transcriber) transcribeRolling(samples []float32) (string, error) {
 	cLang := C.CString(t.config.Language)
 	defer C.free(unsafe.Pointer(cLang))
 
-	params := C.make_params_rolling(C.int(t.config.Threads), cLang)
+	cPrompt := C.CString(t.prevText)
+	defer C.free(unsafe.Pointer(cPrompt))
+
+	params := C.make_params_rolling(C.int(t.config.Threads), cLang, cPrompt)
 
 	ret := C.whisper_full(t.ctx, params, (*C.float)(&samples[0]), C.int(len(samples)))
 	if ret != 0 {

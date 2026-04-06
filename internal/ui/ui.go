@@ -152,3 +152,11 @@ func (a *App) UpdateLatency(latency time.Duration) {
 		a.liveView.UpdateLatency(latency)
 	}
 }
+
+// ShowGPUWarning displays a warning banner in the live view about GPU status.
+// Safe to call from any goroutine.
+func (a *App) ShowGPUWarning(message string) {
+	if a.liveView != nil {
+		a.liveView.ShowGPUWarning(message)
+	}
+}

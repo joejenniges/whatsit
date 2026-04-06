@@ -25,6 +25,7 @@ type Config struct {
 	WindowSizeSecs  int    `yaml:"window_size_secs"` // rolling window size, default: 10
 	WindowStepSecs  int    `yaml:"window_step_secs"` // rolling window step, default: 3
 	SaveAudio       bool   `yaml:"save_audio"`       // save pre-resampled stereo audio to WAV
+	UseGPU          bool   `yaml:"use_gpu"`          // attempt Vulkan GPU acceleration for whisper
 }
 
 // DefaultConfig returns a Config populated with default values.
@@ -37,6 +38,7 @@ func DefaultConfig() Config {
 		ClassifierTier: "scheirer",
 		WindowSizeSecs: 10,
 		WindowStepSecs: 3,
+		UseGPU:         true,
 	}
 }
 

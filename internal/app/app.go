@@ -35,6 +35,7 @@ type UI interface {
 	ClearMusicMarker()
 	UpdateStatus(connected bool, classification string)
 	UpdateLatency(latency time.Duration)
+	ShowGPUWarning(message string)
 	Run()
 }
 
@@ -164,11 +165,18 @@ func (o *Orchestrator) finishInit(modelPath string) {
 	windowSize := o.config.WindowSizeSecs * whisperSampleRate
 	windowStep := o.config.WindowStepSecs * whisperSampleRate
 
+	// Determine GPU availability. The Vulkan DLL must be present next to
+	// the exe AND the user must have GPU enabled in settings.
+	gpuAvailable := transcriber.IsGPUAvailable()
+	useGPU := o.config.UseGPU && gpuAvailable
+	log.Printf("app: GPU config: requested=%v, available=%v, effective=%v", o.config.UseGPU, gpuAvailable, useGPU)
+
 	t, err := transcriber.NewTranscriber(transcriber.TranscriberConfig{
 		ModelPath:  modelPath,
 		Language:   lang,
 		WindowSize: windowSize,
 		WindowStep: windowStep,
+		UseGPU:     useGPU,
 	})
 	if err != nil {
 		log.Fatalf("app: init transcriber: %v", err)
@@ -236,6 +244,13 @@ func (o *Orchestrator) finishInit(modelPath string) {
 	})
 
 	o.ui.ShowMainScreen()
+
+	// Show GPU status warning in the live view if applicable.
+	if o.config.UseGPU && !gpuAvailable {
+		o.ui.ShowGPUWarning("GPU acceleration unavailable -- using CPU (slower). Install Vulkan GPU drivers for better performance.")
+	} else if !o.config.UseGPU {
+		o.ui.ShowGPUWarning("GPU acceleration disabled in settings -- using CPU.")
+	}
 }
 
 // startStreaming sets up the audio pipeline and begins the processing loop.
@@ -368,7 +383,12 @@ func (o *Orchestrator) processingLoop() {
 	var silenceSamples int
 
 	for chunk := range o.resampler.Output() {
-		result := o.classifier.Classify(chunk)
+		// WHY normalize for classification but not transcription: The classifier
+		// thresholds are amplitude-dependent -- a quiet station vs a loud one
+		// produces different feature values, causing misclassification. Whisper
+		// handles varying volume fine (it normalizes internally).
+		normalized := audio.NormalizeRMS(chunk, 0.1)
+		result := o.classifier.Classify(normalized)
 
 		if result.Debounced != currentState && currentState != "" {
 			// State transition confirmed by debounce.

@@ -24,6 +24,7 @@ type ConfigPage struct {
 	streamURLEntry      *widget.Entry
 	modelSizeSelect     *widget.Select
 	modelSizeWarning    *widget.Label
+	useGPUCheck         *widget.Check
 	classifierSelect    *widget.Select
 	saveAudioCheck      *widget.Check
 	acoustIDEntry       *widget.Entry
@@ -73,6 +74,10 @@ func NewConfigPage(cfg *config.Config, onSave func(*config.Config)) *ConfigPage 
 	if cp.modelSizeSelect.Selected == "" {
 		cp.modelSizeSelect.SetSelected("base")
 	}
+
+	// Use GPU checkbox -- placed near model size since GPU makes larger models viable.
+	cp.useGPUCheck = widget.NewCheck("Use Vulkan GPU acceleration (requires restart)", nil)
+	cp.useGPUCheck.SetChecked(cfg.UseGPU)
 
 	// Classifier Tier
 	cp.classifierSelect = widget.NewSelect(
@@ -144,6 +149,7 @@ func NewConfigPage(cfg *config.Config, onSave func(*config.Config)) *ConfigPage 
 		layout.NewFormLayout(),
 		widget.NewLabel("Stream URL"), cp.streamURLEntry,
 		widget.NewLabel("Whisper Model"), container.NewVBox(cp.modelSizeSelect, cp.modelSizeWarning),
+		widget.NewLabel("GPU"), cp.useGPUCheck,
 		widget.NewLabel("Classifier Tier"), cp.classifierSelect,
 		widget.NewLabel("Save Audio"), cp.saveAudioCheck,
 		widget.NewLabel("AcoustID Key"), cp.acoustIDEntry,
@@ -196,6 +202,7 @@ func (cp *ConfigPage) handleSave() {
 
 	cp.cfg.StreamURL = cp.streamURLEntry.Text
 	cp.cfg.ModelSize = cp.modelSizeSelect.Selected
+	cp.cfg.UseGPU = cp.useGPUCheck.Checked
 	cp.cfg.ClassifierTier = cp.classifierSelect.Selected
 	cp.cfg.SaveAudio = cp.saveAudioCheck.Checked
 	cp.cfg.AcoustIDKey = cp.acoustIDEntry.Text
