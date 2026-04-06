@@ -347,17 +347,31 @@ func (t *Transcriber) transcribeRolling(samples []float32) (string, error) {
 	return strings.TrimSpace(strings.Join(parts, " ")), nil
 }
 
+// normalizeWord strips trailing and leading punctuation for comparison.
+// WHY: whisper adds/removes punctuation between overlapping windows.
+// "you." and "you" must match, "by." and "by" must match.
+func normalizeWord(w string) string {
+	w = strings.ToLower(w)
+	w = strings.TrimRight(w, ".,!?;:\"')-]}")
+	w = strings.TrimLeft(w, "\"'(-[{")
+	return w
+}
+
+// wordsMatch compares two words with punctuation normalization.
+func wordsMatch(a, b string) bool {
+	return normalizeWord(a) == normalizeWord(b)
+}
+
 // diffText extracts the new portion of currentText that wasn't in prevText.
-// Uses word-level matching for robustness.
+// Uses word-level matching with punctuation normalization.
 //
 // Strategy: find the longest suffix of prevText words that matches a prefix
-// of currentText words, then return everything after the overlap.
+// of currentText words (ignoring punctuation differences), then return
+// everything after the overlap.
 //
-// Example:
-//
-//	prevText:    "The weather today will be"
-//	currentText: "weather today will be sunny with highs"
-//	result:      "sunny with highs"
+// If the new portion is very short (1-2 words) and looks like it's just
+// trailing punctuation or a minor rephrase, suppress it to avoid emitting
+// near-duplicate lines.
 func diffText(prevText, currentText string) string {
 	if prevText == "" {
 		return currentText
@@ -376,8 +390,8 @@ func diffText(prevText, currentText string) string {
 		return ""
 	}
 
-	// Find the longest suffix of prevWords that matches a prefix of currWords.
-	// We try decreasing suffix lengths -- first match wins (longest overlap).
+	// Strategy 1: Find suffix of prevWords matching a PREFIX of currWords.
+	// This is the common case: window slides forward, old text is at start.
 	bestOverlap := 0
 	maxCheck := len(prevWords)
 	if len(currWords) < maxCheck {
@@ -385,10 +399,9 @@ func diffText(prevText, currentText string) string {
 	}
 
 	for suffixLen := maxCheck; suffixLen > 0; suffixLen-- {
-		// Compare prevWords[len(prevWords)-suffixLen:] with currWords[:suffixLen]
 		match := true
 		for i := 0; i < suffixLen; i++ {
-			if prevWords[len(prevWords)-suffixLen+i] != currWords[i] {
+			if !wordsMatch(prevWords[len(prevWords)-suffixLen+i], currWords[i]) {
 				match = false
 				break
 			}
@@ -399,17 +412,73 @@ func diffText(prevText, currentText string) string {
 		}
 	}
 
-	if bestOverlap == 0 {
-		// No overlap found -- context was lost, return full current text.
-		return currentText
+	if bestOverlap > 0 {
+		remaining := currWords[bestOverlap:]
+		if len(remaining) == 0 {
+			return ""
+		}
+		return strings.Join(remaining, " ")
 	}
 
-	// Return everything after the overlap.
-	remaining := currWords[bestOverlap:]
-	if len(remaining) == 0 {
-		return ""
+	// Strategy 2: Find suffix of prevWords matching ANYWHERE in currWords.
+	// WHY: whisper sometimes prepends new text before the overlap.
+	// e.g., prev: "find that life has passed you by"
+	//        curr: "And in the quiet still aside, find that life has passed you by"
+	// The overlap is in the middle/end of curr, not the start.
+	for suffixLen := maxCheck; suffixLen >= 3; suffixLen-- {
+		suffix := prevWords[len(prevWords)-suffixLen:]
+		// Search for this suffix anywhere in currWords.
+		for startPos := 0; startPos+suffixLen <= len(currWords); startPos++ {
+			match := true
+			for i := 0; i < suffixLen; i++ {
+				if !wordsMatch(suffix[i], currWords[startPos+i]) {
+					match = false
+					break
+				}
+			}
+			if match {
+				// Found the overlap. Everything BEFORE the overlap is new
+				// (prepended text). Everything after should already be known.
+				if startPos == 0 {
+					// Overlap at the start -- no new content before it.
+					after := currWords[startPos+suffixLen:]
+					if len(after) == 0 {
+						return ""
+					}
+					return strings.Join(after, " ")
+				}
+				// New content is the words before the overlap.
+				before := currWords[:startPos]
+				return strings.Join(before, " ")
+			}
+		}
 	}
-	return strings.Join(remaining, " ")
+
+	// Strategy 3: No overlap found. Check for near-duplicate (>80% match).
+	matchCount := 0
+	checkLen := len(currWords)
+	if len(prevWords) < checkLen {
+		checkLen = len(prevWords)
+	}
+	for i := 0; i < checkLen; i++ {
+		if wordsMatch(prevWords[i], currWords[i]) {
+			matchCount++
+		}
+	}
+	if checkLen > 0 && float64(matchCount)/float64(checkLen) > 0.8 {
+		newStart := matchCount
+		if newStart >= len(currWords) {
+			return ""
+		}
+		remaining := currWords[newStart:]
+		if len(remaining) <= 2 {
+			return ""
+		}
+		return strings.Join(remaining, " ")
+	}
+
+	// Truly different content.
+	return currentText
 }
 
 // stripMusicNotes removes unicode music symbols whisper emits on music audio.

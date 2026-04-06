@@ -92,8 +92,8 @@ func TestWhisperClassifierBuffering(t *testing.T) {
 	if result.Raw != result.Debounced {
 		t.Errorf("whisper classifier should have Raw == Debounced, got Raw=%s Debounced=%s", result.Raw, result.Debounced)
 	}
-	if c.LastText() != "Hello this is a test broadcast" {
-		t.Errorf("expected LastText to be set, got %q", c.LastText())
+	if c.ConsumeText() != "Hello this is a test broadcast" {
+		t.Errorf("expected LastText to be set, got %q", c.ConsumeText())
 	}
 }
 
@@ -110,8 +110,8 @@ func TestWhisperClassifierMusicResult(t *testing.T) {
 	if result.Debounced != ClassMusic {
 		t.Errorf("expected ClassMusic for [Music] output, got %s", result.Debounced)
 	}
-	if c.LastText() != "" {
-		t.Errorf("expected empty LastText for music, got %q", c.LastText())
+	if c.ConsumeText() != "" {
+		t.Errorf("expected empty LastText for music, got %q", c.ConsumeText())
 	}
 }
 
