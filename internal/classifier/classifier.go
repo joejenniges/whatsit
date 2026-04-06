@@ -1,23 +1,17 @@
 package classifier
 
-// Classification represents the audio content type of a chunk.
-type Classification string
-
-const (
-	ClassSpeech  Classification = "speech"
-	ClassMusic   Classification = "music"
-	ClassSilence Classification = "silence"
-)
-
 const defaultSampleRate = 16000
 
-// Classifier combines ZCR, RMS energy, spectral centroid, and spectral flux
+// LegacyClassifier combines ZCR, RMS energy, spectral centroid, and spectral flux
 // to distinguish speech from music in 2-second PCM chunks (16 kHz, mono,
 // float32). No AI -- pure DSP heuristics.
-type Classifier struct {
+//
+// Deprecated: Use NewClassifier(tier, sampleRate) via the AudioClassifier interface instead.
+// This will be removed once all tiers are implemented and validated.
+type LegacyClassifier struct {
 	prevSpectrum []float64
 
-	// Configurable thresholds -- sensible defaults set by NewClassifier.
+	// Configurable thresholds -- sensible defaults set by NewLegacyClassifier.
 	SilenceThreshold    float64 // RMS below this = silence
 	SpeechZCRMin        float64 // ZCR above this contributes to speech score
 	MusicFluxMax        float64 // spectral flux below this contributes to music score
@@ -34,15 +28,15 @@ type Classifier struct {
 	debounceN  int
 }
 
-// NewClassifier returns a Classifier with tuned defaults for 16 kHz audio.
+// NewLegacyClassifier returns a LegacyClassifier with tuned defaults for 16 kHz audio.
 //
 // WHY these thresholds: Tuned against real 48kHz 320kbps MP3 radio resampled
 // to 16kHz mono. Compressed radio audio has universally high ZCR (0.07-0.15)
 // and enormous spectral flux (48K-400K) even for music, so those features
 // cannot discriminate well. Energy variance is the strongest discriminator:
 // music sustains energy (variance < 0.0005), speech is bursty (variance > 0.001).
-func NewClassifier() *Classifier {
-	return &Classifier{
+func NewLegacyClassifier() *LegacyClassifier {
+	return &LegacyClassifier{
 		SilenceThreshold:   0.005,
 		SpeechZCRMin:       0.15,   // WHY: compressed audio has high ZCR even for music (0.07-0.15). Only extreme ZCR suggests speech.
 		MusicFluxMax:       150000, // WHY: real radio music flux ranges 48K-400K. Values below 150K suggest stable content (music-like).
@@ -57,7 +51,7 @@ func NewClassifier() *Classifier {
 
 // SetDebounce configures the number of consecutive identical raw
 // classifications required before the output switches. Must be >= 1.
-func (c *Classifier) SetDebounce(n int) {
+func (c *LegacyClassifier) SetDebounce(n int) {
 	if n < 1 {
 		n = 1
 	}
@@ -68,7 +62,7 @@ func (c *Classifier) SetDebounce(n int) {
 //
 // Expected input: ~2 seconds of 16 kHz mono float32 (32000 samples).
 // Shorter or longer buffers work but may affect threshold accuracy.
-func (c *Classifier) Classify(samples []float32) Classification {
+func (c *LegacyClassifier) Classify(samples []float32) Classification {
 	if len(samples) == 0 {
 		return c.debounce(ClassSilence)
 	}
@@ -153,7 +147,7 @@ func (c *Classifier) Classify(samples []float32) Classification {
 
 // debounce applies hysteresis: the output only changes after debounceN
 // consecutive identical raw classifications.
-func (c *Classifier) debounce(raw Classification) Classification {
+func (c *LegacyClassifier) debounce(raw Classification) Classification {
 	if raw == c.rawClass {
 		c.classCount++
 	} else {

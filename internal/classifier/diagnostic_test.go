@@ -60,7 +60,7 @@ func TestDiagnostic(t *testing.T) {
 	log.Printf("Stream sample rate: %d Hz", srcRate)
 
 	// Read, decode, resample, classify
-	c := NewClassifier()
+	c := NewLegacyClassifier()
 	c.SetDebounce(1) // no debounce for raw feature analysis
 
 	fmt.Println()

@@ -31,6 +31,7 @@ type UI interface {
 	AppendSong(title, artist string)
 	AppendMusic()
 	UpdateStatus(connected bool, classification string)
+	UpdateLatency(latency time.Duration)
 	Run()
 }
 
@@ -44,7 +45,7 @@ type Orchestrator struct {
 	streamer    *audio.Streamer
 	decoder     *audio.Decoder
 	resampler   *audio.Resampler
-	classifier  *classifier.Classifier
+	classifier  classifier.AudioClassifier
 	transcriber *transcriber.Transcriber
 
 	// WHY optional: musicid requires libchromaprint and an AcoustID API key.
@@ -56,8 +57,7 @@ type Orchestrator struct {
 	// pipeline -- pre-resampling so the user hears full-quality stereo audio.
 	listener *audio.Listener
 
-	speechBuffer *audio.Buffer
-	musicBuffer  *audio.Buffer
+	musicBuffer *audio.Buffer
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -140,9 +140,14 @@ func (o *Orchestrator) finishInit(modelPath string) {
 		lang = "en"
 	}
 
+	windowSize := o.config.WindowSizeSecs * whisperSampleRate
+	windowStep := o.config.WindowStepSecs * whisperSampleRate
+
 	t, err := transcriber.NewTranscriber(transcriber.TranscriberConfig{
-		ModelPath: modelPath,
-		Language:  lang,
+		ModelPath:  modelPath,
+		Language:   lang,
+		WindowSize: windowSize,
+		WindowStep: windowStep,
 	})
 	if err != nil {
 		log.Fatalf("app: init transcriber: %v", err)
@@ -157,7 +162,12 @@ func (o *Orchestrator) finishInit(modelPath string) {
 		o.fingerprinter = fp
 	}
 
-	o.classifier = classifier.NewClassifier()
+	tier := o.config.ClassifierTier
+	if tier == "" {
+		tier = "scheirer"
+	}
+	o.classifier = classifier.NewClassifier(tier, whisperSampleRate, o.config.ClassifierDebug)
+	log.Printf("app: classifier tier: %s (%s)", tier, o.classifier.Name())
 
 	// Wire UI callbacks.
 	o.ui.SetCallbacks(
@@ -257,9 +267,8 @@ func (o *Orchestrator) startStreaming() {
 	o.resampler = audio.NewResampler(resamplerInput, inputRate, whisperSampleRate)
 	o.resampler.Start(o.ctx)
 
-	// Buffers sized for ~60s of 16 kHz audio. Large enough to avoid drops,
-	// small enough to bound memory.
-	o.speechBuffer = audio.NewBuffer(whisperSampleRate * 60)
+	// Music buffer sized for ~60s of 16 kHz audio. Speech goes directly
+	// to the transcriber's rolling window via FeedChunk.
 	o.musicBuffer = audio.NewBuffer(whisperSampleRate * 60)
 
 	o.streaming = true
@@ -278,21 +287,35 @@ func (o *Orchestrator) processingLoop() {
 
 		switch class {
 		case classifier.ClassSpeech:
-			// Transitioning from music -> speech: flush music buffer.
+			// Transitioning from music -> speech: flush music buffer and
+			// reset the transcriber's rolling window for a fresh start.
 			if lastClass == classifier.ClassMusic {
 				o.flushMusicBuffer()
+				o.transcriber.Reset()
 			}
 			silenceSamples = 0
-			o.speechBuffer.Write(chunk)
 
-			if o.speechBuffer.Duration(whisperSampleRate) >= 10*time.Second {
-				go o.transcribeSpeech()
+			// Feed directly to transcriber's rolling window.
+			text, triggered, err := o.transcriber.FeedChunk(chunk)
+			if err != nil {
+				log.Printf("app: transcribe: %v", err)
+			} else if triggered && text != "" {
+				now := time.Now()
+				entry := &storage.LogEntry{
+					Timestamp: now,
+					EntryType: "speech",
+					Content:   text,
+				}
+				if dbErr := o.db.InsertEntry(entry); dbErr != nil {
+					log.Printf("app: insert speech entry: %v", dbErr)
+				}
+				o.ui.AppendTranscription(now, text)
 			}
 
 		case classifier.ClassMusic:
-			// Transitioning from speech -> music: flush speech buffer.
+			// Transitioning from speech -> music: reset transcriber window.
 			if lastClass == classifier.ClassSpeech {
-				o.flushSpeechBuffer()
+				o.transcriber.Reset()
 			}
 			silenceSamples = 0
 			o.musicBuffer.Write(chunk)
@@ -305,7 +328,7 @@ func (o *Orchestrator) processingLoop() {
 			silenceSamples += len(chunk)
 			// Flush on long silence (>5s).
 			if silenceSamples > whisperSampleRate*5 {
-				o.flushSpeechBuffer()
+				o.transcriber.Reset()
 				o.flushMusicBuffer()
 				silenceSamples = 0
 			}
@@ -319,17 +342,9 @@ func (o *Orchestrator) processingLoop() {
 	}
 
 	// Channel closed -- streamer/decoder/resampler pipeline ended.
-	o.flushSpeechBuffer()
+	o.transcriber.Reset()
 	o.flushMusicBuffer()
 	o.ui.UpdateStatus(false, "disconnected")
-}
-
-// flushSpeechBuffer transcribes whatever is in the speech buffer.
-func (o *Orchestrator) flushSpeechBuffer() {
-	if o.speechBuffer == nil || o.speechBuffer.Len() == 0 {
-		return
-	}
-	go o.transcribeSpeech()
 }
 
 // flushMusicBuffer identifies whatever is in the music buffer.
@@ -338,38 +353,6 @@ func (o *Orchestrator) flushMusicBuffer() {
 		return
 	}
 	go o.identifyMusic()
-}
-
-// transcribeSpeech drains the speech buffer and runs whisper inference.
-func (o *Orchestrator) transcribeSpeech() {
-	samples := o.speechBuffer.ReadAll()
-	if len(samples) == 0 {
-		return
-	}
-
-	text, err := o.transcriber.Transcribe(samples)
-	if err != nil {
-		log.Printf("app: transcribe: %v", err)
-		return
-	}
-	if text == "" {
-		return
-	}
-
-	now := time.Now()
-	durationMs := int64(len(samples)) * 1000 / int64(whisperSampleRate)
-
-	entry := &storage.LogEntry{
-		Timestamp:  now,
-		EntryType:  "speech",
-		Content:    text,
-		DurationMs: durationMs,
-	}
-	if err := o.db.InsertEntry(entry); err != nil {
-		log.Printf("app: insert speech entry: %v", err)
-	}
-
-	o.ui.AppendTranscription(now, text)
 }
 
 // identifyMusic drains the music buffer, fingerprints it, and logs the result.

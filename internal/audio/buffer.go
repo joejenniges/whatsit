@@ -78,6 +78,19 @@ func (b *Buffer) Len() int {
 	return len(b.data)
 }
 
+// TrimFront removes the first n samples from the buffer.
+// If n >= Len(), the buffer is cleared entirely.
+func (b *Buffer) TrimFront(n int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if n >= len(b.data) {
+		b.data = b.data[:0]
+		return
+	}
+	b.data = b.data[n:]
+}
+
 // Clear removes all samples from the buffer.
 func (b *Buffer) Clear() {
 	b.mu.Lock()

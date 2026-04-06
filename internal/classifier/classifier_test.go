@@ -6,7 +6,7 @@ import (
 )
 
 func TestClassify_Silence(t *testing.T) {
-	c := NewClassifier()
+	c := NewLegacyClassifier()
 	c.SetDebounce(1) // disable debounce for unit test clarity
 
 	samples := make([]float32, 32000) // 2s of silence at 16 kHz
@@ -17,7 +17,7 @@ func TestClassify_Silence(t *testing.T) {
 }
 
 func TestClassify_EmptyInput(t *testing.T) {
-	c := NewClassifier()
+	c := NewLegacyClassifier()
 	c.SetDebounce(1)
 
 	result := c.Classify(nil)
@@ -28,7 +28,7 @@ func TestClassify_EmptyInput(t *testing.T) {
 
 func TestClassify_LoudNoise(t *testing.T) {
 	// A high-ZCR, rapidly varying signal should lean toward speech.
-	c := NewClassifier()
+	c := NewLegacyClassifier()
 	c.SetDebounce(1)
 
 	// Generate a noisy signal with high ZCR: alternating positive/negative
@@ -58,7 +58,7 @@ func TestClassify_LoudNoise(t *testing.T) {
 func TestClassify_SustainedTone(t *testing.T) {
 	// A pure low-frequency tone has low ZCR, low spectral flux across
 	// calls, and sustained energy -- should lean toward music.
-	c := NewClassifier()
+	c := NewLegacyClassifier()
 	c.SetDebounce(1)
 
 	freq := 300.0 // Hz, low tone
@@ -80,7 +80,7 @@ func TestClassify_SustainedTone(t *testing.T) {
 }
 
 func TestDebounce_RequiresConsecutive(t *testing.T) {
-	c := NewClassifier()
+	c := NewLegacyClassifier()
 	c.SetDebounce(3)
 
 	// Start from silence (default). Feed speech-like signals and verify
@@ -107,7 +107,7 @@ func TestDebounce_RequiresConsecutive(t *testing.T) {
 }
 
 func TestDebounce_InterruptResetsCount(t *testing.T) {
-	c := NewClassifier()
+	c := NewLegacyClassifier()
 	c.SetDebounce(3)
 
 	speech := makeSpeechLike(32000)
@@ -137,7 +137,7 @@ func TestDebounce_InterruptResetsCount(t *testing.T) {
 }
 
 func TestSetDebounce_MinimumOne(t *testing.T) {
-	c := NewClassifier()
+	c := NewLegacyClassifier()
 	c.SetDebounce(0)
 
 	// Should be clamped to 1, meaning immediate switching.

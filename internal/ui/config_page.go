@@ -19,14 +19,18 @@ type ConfigPage struct {
 	cfg    *config.Config
 	onSave func(*config.Config)
 
-	streamURLEntry   *widget.Entry
-	modelSizeSelect  *widget.Select
-	acoustIDEntry    *widget.Entry
-	languageSelect   *widget.Select
-	bufferSecsEntry  *widget.Entry
-	saveBtn          *widget.Button
-	openFolderBtn    *widget.Button
-	statusLbl        *widget.Label
+	streamURLEntry      *widget.Entry
+	modelSizeSelect     *widget.Select
+	modelSizeWarning    *widget.Label
+	classifierSelect    *widget.Select
+	acoustIDEntry       *widget.Entry
+	languageSelect      *widget.Select
+	bufferSecsEntry     *widget.Entry
+	windowSizeEntry     *widget.Entry
+	windowStepEntry     *widget.Entry
+	saveBtn             *widget.Button
+	openFolderBtn       *widget.Button
+	statusLbl           *widget.Label
 
 	root fyne.CanvasObject
 }
@@ -49,13 +53,32 @@ func NewConfigPage(cfg *config.Config, onSave func(*config.Config)) *ConfigPage 
 	cp.streamURLEntry.SetText(cfg.StreamURL)
 
 	// Whisper Model Size
+	cp.modelSizeWarning = widget.NewLabel("Warning: small/medium models may not keep up with real-time transcription on CPU")
+	cp.modelSizeWarning.Hide()
+
 	cp.modelSizeSelect = widget.NewSelect(
 		[]string{"tiny", "base", "small", "medium"},
-		nil,
+		func(selected string) {
+			if selected == "small" || selected == "medium" {
+				cp.modelSizeWarning.Show()
+			} else {
+				cp.modelSizeWarning.Hide()
+			}
+		},
 	)
 	cp.modelSizeSelect.SetSelected(cfg.ModelSize)
 	if cp.modelSizeSelect.Selected == "" {
 		cp.modelSizeSelect.SetSelected("base")
+	}
+
+	// Classifier Tier
+	cp.classifierSelect = widget.NewSelect(
+		[]string{"basic", "scheirer", "mfcc"},
+		nil,
+	)
+	cp.classifierSelect.SetSelected(cfg.ClassifierTier)
+	if cp.classifierSelect.Selected == "" {
+		cp.classifierSelect.SetSelected("scheirer")
 	}
 
 	// AcoustID API Key
@@ -79,6 +102,24 @@ func NewConfigPage(cfg *config.Config, onSave func(*config.Config)) *ConfigPage 
 		cp.bufferSecsEntry.SetText("10")
 	}
 
+	// Window Size
+	cp.windowSizeEntry = widget.NewEntry()
+	cp.windowSizeEntry.SetPlaceHolder("Rolling window size (seconds)")
+	if cfg.WindowSizeSecs > 0 {
+		cp.windowSizeEntry.SetText(strconv.Itoa(cfg.WindowSizeSecs))
+	} else {
+		cp.windowSizeEntry.SetText("10")
+	}
+
+	// Window Step
+	cp.windowStepEntry = widget.NewEntry()
+	cp.windowStepEntry.SetPlaceHolder("Rolling window step (seconds)")
+	if cfg.WindowStepSecs > 0 {
+		cp.windowStepEntry.SetText(strconv.Itoa(cfg.WindowStepSecs))
+	} else {
+		cp.windowStepEntry.SetText("3")
+	}
+
 	// Status label for save feedback
 	cp.statusLbl = widget.NewLabel("")
 
@@ -92,10 +133,13 @@ func NewConfigPage(cfg *config.Config, onSave func(*config.Config)) *ConfigPage 
 	form := container.New(
 		layout.NewFormLayout(),
 		widget.NewLabel("Stream URL"), cp.streamURLEntry,
-		widget.NewLabel("Whisper Model"), cp.modelSizeSelect,
+		widget.NewLabel("Whisper Model"), container.NewVBox(cp.modelSizeSelect, cp.modelSizeWarning),
+		widget.NewLabel("Classifier Tier"), cp.classifierSelect,
 		widget.NewLabel("AcoustID Key"), cp.acoustIDEntry,
 		widget.NewLabel("Language"), cp.languageSelect,
 		widget.NewLabel("Buffer (seconds)"), cp.bufferSecsEntry,
+		widget.NewLabel("Window Size (s)"), cp.windowSizeEntry,
+		widget.NewLabel("Window Step (s)"), cp.windowStepEntry,
 	)
 
 	buttons := container.NewHBox(cp.saveBtn, cp.openFolderBtn)
@@ -128,11 +172,25 @@ func (cp *ConfigPage) handleSave() {
 		return
 	}
 
+	winSize, err2 := strconv.Atoi(cp.windowSizeEntry.Text)
+	if err2 != nil || winSize < 5 {
+		cp.statusLbl.SetText("Window size must be at least 5 seconds.")
+		return
+	}
+	winStep, err3 := strconv.Atoi(cp.windowStepEntry.Text)
+	if err3 != nil || winStep < 1 {
+		cp.statusLbl.SetText("Window step must be at least 1 second.")
+		return
+	}
+
 	cp.cfg.StreamURL = cp.streamURLEntry.Text
 	cp.cfg.ModelSize = cp.modelSizeSelect.Selected
+	cp.cfg.ClassifierTier = cp.classifierSelect.Selected
 	cp.cfg.AcoustIDKey = cp.acoustIDEntry.Text
 	cp.cfg.Language = cp.languageSelect.Selected
 	cp.cfg.BufferSecs = bufSecs
+	cp.cfg.WindowSizeSecs = winSize
+	cp.cfg.WindowStepSecs = winStep
 
 	if cp.onSave != nil {
 		cp.onSave(cp.cfg)

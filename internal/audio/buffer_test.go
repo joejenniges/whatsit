@@ -155,6 +155,53 @@ func TestBuffer_ConcurrentWrites(t *testing.T) {
 	}
 }
 
+func TestBuffer_TrimFront(t *testing.T) {
+	buf := NewBuffer(1000)
+	buf.Write([]float32{1, 2, 3, 4, 5})
+
+	buf.TrimFront(2)
+	if buf.Len() != 3 {
+		t.Fatalf("expected Len()=3 after TrimFront(2), got %d", buf.Len())
+	}
+	got := buf.ReadAll()
+	expected := []float32{3, 4, 5}
+	for i, v := range expected {
+		if got[i] != v {
+			t.Fatalf("sample[%d]: expected %f, got %f", i, v, got[i])
+		}
+	}
+}
+
+func TestBuffer_TrimFront_ExceedsLen(t *testing.T) {
+	buf := NewBuffer(1000)
+	buf.Write([]float32{1, 2, 3})
+
+	buf.TrimFront(10)
+	if buf.Len() != 0 {
+		t.Fatalf("expected Len()=0 after TrimFront exceeding length, got %d", buf.Len())
+	}
+}
+
+func TestBuffer_TrimFront_Zero(t *testing.T) {
+	buf := NewBuffer(1000)
+	buf.Write([]float32{1, 2, 3})
+
+	buf.TrimFront(0)
+	if buf.Len() != 3 {
+		t.Fatalf("expected Len()=3 after TrimFront(0), got %d", buf.Len())
+	}
+}
+
+func TestBuffer_TrimFront_ExactLen(t *testing.T) {
+	buf := NewBuffer(1000)
+	buf.Write([]float32{1, 2, 3})
+
+	buf.TrimFront(3)
+	if buf.Len() != 0 {
+		t.Fatalf("expected Len()=0 after TrimFront(Len()), got %d", buf.Len())
+	}
+}
+
 func TestBuffer_ConcurrentReadWrite(t *testing.T) {
 	buf := NewBuffer(100000)
 	var wg sync.WaitGroup

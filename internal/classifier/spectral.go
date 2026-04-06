@@ -108,6 +108,111 @@ func SpectralCentroid(samples []float32, sampleRate int) float64 {
 	return weightedSum / totalMag
 }
 
+// PowerSpectrum returns |FFT(x)|^2 for positive frequencies.
+// The input is Hann-windowed and zero-padded to the next power of 2.
+// Returns N/2+1 bins where N is the padded length.
+func PowerSpectrum(samples []float64) []float64 {
+	n := nextPow2(len(samples))
+	buf := make([]complex128, n)
+
+	nSamples := len(samples)
+	for i, s := range samples {
+		w := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(nSamples-1)))
+		buf[i] = complex(s*w, 0)
+	}
+
+	fft(buf)
+
+	bins := n/2 + 1
+	ps := make([]float64, bins)
+	for i := 0; i < bins; i++ {
+		r := real(buf[i])
+		im := imag(buf[i])
+		ps[i] = r*r + im*im
+	}
+	return ps
+}
+
+// SpectralFlatness computes Wiener entropy: geometric mean / arithmetic mean
+// of the power spectrum.
+//
+// Typical values:
+//
+//	Music (tonal peaks): 0.0 - 0.3
+//	Speech (noise-like):  0.2 - 0.6
+//	White noise:          0.7 - 1.0
+//
+// The DC component (bin 0) is skipped. An epsilon of 1e-10 is added before
+// taking the log to avoid -Inf.
+func SpectralFlatness(samples []float32) float64 {
+	// Convert to float64 for PowerSpectrum.
+	f64 := make([]float64, len(samples))
+	for i, s := range samples {
+		f64[i] = float64(s)
+	}
+
+	ps := PowerSpectrum(f64)
+
+	// Skip DC (bin 0).
+	if len(ps) < 2 {
+		return 0
+	}
+	ps = ps[1:]
+
+	n := float64(len(ps))
+	if n == 0 {
+		return 0
+	}
+
+	const epsilon = 1e-10
+
+	// Geometric mean via log: exp(mean(log(x)))
+	var logSum, arithSum float64
+	for _, p := range ps {
+		logSum += math.Log(p + epsilon)
+		arithSum += p
+	}
+
+	geoMean := math.Exp(logSum / n)
+	arithMean := arithSum / n
+
+	if arithMean < epsilon {
+		return 0
+	}
+	return geoMean / arithMean
+}
+
+// SpectralRolloff finds the frequency below which rolloffPercent of the
+// total spectral energy sits.
+//
+// powerSpectrum should contain N/2+1 bins from a size-N FFT.
+// rolloffPercent is in [0, 1], e.g. 0.85 for the 85th percentile.
+func SpectralRolloff(powerSpectrum []float64, sampleRate int, rolloffPercent float64) float64 {
+	if len(powerSpectrum) == 0 {
+		return 0
+	}
+
+	var totalEnergy float64
+	for _, p := range powerSpectrum {
+		totalEnergy += p
+	}
+
+	threshold := rolloffPercent * totalEnergy
+	n := (len(powerSpectrum) - 1) * 2 // FFT size
+	freqPerBin := float64(sampleRate) / float64(n)
+
+	var cumulative float64
+	for i, p := range powerSpectrum {
+		cumulative += p
+		if cumulative >= threshold {
+			return float64(i) * freqPerBin
+		}
+	}
+
+	// All energy accounted for -- return Nyquist.
+	return float64(len(powerSpectrum)-1) * freqPerBin
+}
+
 // SpectralFlux computes the sum of squared positive differences between
 // the current and previous magnitude spectra. Only increases in energy
 // are counted (half-wave rectified), which better captures onsets.

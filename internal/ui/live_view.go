@@ -13,12 +13,13 @@ import (
 // LiveView shows a scrolling transcription log with a status bar and
 // start/stop controls.
 type LiveView struct {
-	textArea  *widget.RichText
-	scroll    *container.Scroll
-	statusLbl *widget.Label
-	startBtn  *widget.Button
-	stopBtn   *widget.Button
-	listenBtn *widget.Check
+	textArea   *widget.RichText
+	scroll     *container.Scroll
+	statusLbl  *widget.Label
+	latencyLbl *widget.Label
+	startBtn   *widget.Button
+	stopBtn    *widget.Button
+	listenBtn  *widget.Check
 
 	root fyne.CanvasObject
 
@@ -48,6 +49,7 @@ func NewLiveView(onStart, onStop func(), onListen func(enabled bool)) *LiveView 
 	lv.scroll.SetMinSize(fyne.NewSize(600, 350))
 
 	lv.statusLbl = widget.NewLabel("[Disconnected]  Classification: --")
+	lv.latencyLbl = widget.NewLabel("")
 
 	lv.startBtn = widget.NewButton("Start", func() {
 		lv.setRunning(true)
@@ -74,9 +76,10 @@ func NewLiveView(onStart, onStop func(), onListen func(enabled bool)) *LiveView 
 
 	buttons := container.NewHBox(lv.startBtn, lv.stopBtn, lv.listenBtn)
 
+	statusInfo := container.NewHBox(lv.statusLbl, lv.latencyLbl)
 	statusBar := container.NewBorder(
 		nil, nil,
-		lv.statusLbl, buttons,
+		statusInfo, buttons,
 	)
 
 	lv.root = container.NewBorder(
@@ -162,6 +165,15 @@ func (lv *LiveView) UpdateStatus(connected bool, classification string) {
 
 	fyne.Do(func() {
 		lv.statusLbl.SetText(fmt.Sprintf("%s  Classification: %s", connText, classText))
+	})
+}
+
+// UpdateLatency updates the latency indicator in the status bar.
+// Safe to call from any goroutine.
+func (lv *LiveView) UpdateLatency(latency time.Duration) {
+	text := fmt.Sprintf("Latency: ~%ds", int(latency.Seconds()))
+	fyne.Do(func() {
+		lv.latencyLbl.SetText(text)
 	})
 }
 

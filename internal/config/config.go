@@ -14,21 +14,28 @@ const (
 
 // Config holds all user-configurable settings for RadioTranscriber.
 type Config struct {
-	StreamURL   string `yaml:"stream_url"`
-	ModelSize   string `yaml:"model_size"`
-	ModelPath   string `yaml:"model_path"`
-	AcoustIDKey string `yaml:"acoustid_key"`
-	Language    string `yaml:"language"`
-	BufferSecs  int    `yaml:"buffer_secs"`
+	StreamURL       string `yaml:"stream_url"`
+	ModelSize       string `yaml:"model_size"`
+	ModelPath       string `yaml:"model_path"`
+	AcoustIDKey     string `yaml:"acoustid_key"`
+	Language        string `yaml:"language"`
+	BufferSecs      int    `yaml:"buffer_secs"`
+	ClassifierTier  string `yaml:"classifier_tier"`  // basic, scheirer, mfcc
+	ClassifierDebug bool   `yaml:"classifier_debug"` // log raw feature values
+	WindowSizeSecs  int    `yaml:"window_size_secs"` // rolling window size, default: 10
+	WindowStepSecs  int    `yaml:"window_step_secs"` // rolling window step, default: 3
 }
 
 // DefaultConfig returns a Config populated with default values.
 func DefaultConfig() Config {
 	return Config{
-		StreamURL:  "",
-		ModelSize:  "base",
-		Language:   "en",
-		BufferSecs: 10,
+		StreamURL:      "",
+		ModelSize:      "base",
+		Language:       "en",
+		BufferSecs:     10,
+		ClassifierTier: "scheirer",
+		WindowSizeSecs: 10,
+		WindowStepSecs: 3,
 	}
 }
 

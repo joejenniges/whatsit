@@ -136,3 +136,11 @@ func (a *App) UpdateStatus(connected bool, classification string) {
 		a.liveView.UpdateStatus(connected, classification)
 	}
 }
+
+// UpdateLatency updates the latency indicator in the live view.
+// Safe to call from any goroutine.
+func (a *App) UpdateLatency(latency time.Duration) {
+	if a.liveView != nil {
+		a.liveView.UpdateLatency(latency)
+	}
+}
