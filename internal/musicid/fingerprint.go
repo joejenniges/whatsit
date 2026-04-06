@@ -87,6 +87,58 @@ func (f *Fingerprinter) Fingerprint(samples []float32, sampleRate int) (string, 
 	return fp, duration, nil
 }
 
+// FingerprintInt16 generates a fingerprint from int16 PCM samples (the native
+// format Chromaprint expects). Supports mono or stereo.
+//
+// WHY this method: The original Fingerprint() converts float32->int16 and only
+// handles mono at 16kHz. But Chromaprint produces much better fingerprints from
+// the original pre-resampled audio (e.g., 48kHz stereo). AcoustID was rejecting
+// fingerprints from 16kHz audio as "invalid fingerprint".
+func (f *Fingerprinter) FingerprintInt16(samples []int16, sampleRate, channels int) (string, int, error) {
+	if f.ctx == nil {
+		return "", 0, fmt.Errorf("chromaprint: fingerprinter is closed")
+	}
+	if len(samples) == 0 {
+		return "", 0, fmt.Errorf("chromaprint: no samples provided")
+	}
+	if sampleRate <= 0 {
+		return "", 0, fmt.Errorf("chromaprint: invalid sample rate %d", sampleRate)
+	}
+	if channels <= 0 {
+		return "", 0, fmt.Errorf("chromaprint: invalid channel count %d", channels)
+	}
+
+	// Cast Go []int16 to C []int16_t (same underlying type).
+	pcm := make([]C.int16_t, len(samples))
+	for i, s := range samples {
+		pcm[i] = C.int16_t(s)
+	}
+
+	if rc := C.chromaprint_start(f.ctx, C.int(sampleRate), C.int(channels)); rc == 0 {
+		return "", 0, fmt.Errorf("chromaprint: start failed")
+	}
+
+	if rc := C.chromaprint_feed(f.ctx, &pcm[0], C.int(len(pcm))); rc == 0 {
+		return "", 0, fmt.Errorf("chromaprint: feed failed")
+	}
+
+	if rc := C.chromaprint_finish(f.ctx); rc == 0 {
+		return "", 0, fmt.Errorf("chromaprint: finish failed")
+	}
+
+	var cfp *C.char
+	if rc := C.chromaprint_get_fingerprint(f.ctx, &cfp); rc == 0 {
+		return "", 0, fmt.Errorf("chromaprint: get fingerprint failed")
+	}
+	defer C.chromaprint_dealloc(unsafe.Pointer(cfp))
+
+	fp := C.GoString(cfp)
+	// Total samples / channels / sampleRate = duration in seconds.
+	duration := len(samples) / channels / sampleRate
+
+	return fp, duration, nil
+}
+
 // Close frees the underlying Chromaprint context. The Fingerprinter must not be
 // used after Close is called.
 func (f *Fingerprinter) Close() {

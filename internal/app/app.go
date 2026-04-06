@@ -62,8 +62,11 @@ type Orchestrator struct {
 	// pipeline -- pre-resampling so the user hears full-quality stereo audio.
 	listener *audio.Listener
 
-	musicBuffer *audio.Buffer
-	recorder    *audio.SegmentRecorder
+	musicBuffer    *audio.Buffer
+	rawMusicBuffer []int16 // original stereo int16 for Chromaprint fingerprinting
+	rawMusicRate   int     // sample rate of raw audio
+	rawMusicMu     sync.Mutex
+	recorder       *audio.SegmentRecorder
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -299,6 +302,7 @@ func (o *Orchestrator) startStreaming() {
 	}
 	audioDir := filepath.Join(appDir, "audio")
 	o.recorder = audio.NewSegmentRecorder(audioDir, inputRate, 2, o.config.SaveAudio)
+	o.rawMusicRate = inputRate
 
 	// Initialize the audio listener for speaker output. Non-fatal if it fails
 	// (e.g., no audio output device). Starts disabled -- user toggles it on.
@@ -329,6 +333,18 @@ func (o *Orchestrator) startStreaming() {
 			if o.recorder != nil {
 				o.recorder.WriteInt16(samples)
 			}
+			// Buffer raw stereo int16 for Chromaprint fingerprinting.
+			// WHY here: Chromaprint needs the original pre-resampled audio
+			// (48kHz stereo) to produce valid fingerprints. AcoustID was
+			// rejecting fingerprints from 16kHz mono as "invalid fingerprint".
+			o.rawMusicMu.Lock()
+			o.rawMusicBuffer = append(o.rawMusicBuffer, samples...)
+			// Cap at ~60 seconds of stereo audio at the stream rate.
+			maxRaw := o.rawMusicRate * 2 * 60
+			if len(o.rawMusicBuffer) > maxRaw {
+				o.rawMusicBuffer = o.rawMusicBuffer[len(o.rawMusicBuffer)-maxRaw:]
+			}
+			o.rawMusicMu.Unlock()
 			// Forward to resampler.
 			select {
 			case resamplerInput <- samples:
@@ -583,11 +599,18 @@ func (o *Orchestrator) identifyMusic() {
 		return
 	}
 
+	// Grab the raw stereo int16 audio for fingerprinting.
+	o.rawMusicMu.Lock()
+	rawSamples := make([]int16, len(o.rawMusicBuffer))
+	copy(rawSamples, o.rawMusicBuffer)
+	o.rawMusicBuffer = o.rawMusicBuffer[:0]
+	o.rawMusicMu.Unlock()
+
 	durationMs := int64(len(samples)) * 1000 / int64(whisperSampleRate)
 
 	// Try fingerprinting + AcoustID lookup if available.
-	if o.fingerprinter != nil && o.acoustidClient != nil {
-		fp, dur, fpErr := o.fingerprinter.Fingerprint(samples, whisperSampleRate)
+	if o.fingerprinter != nil && o.acoustidClient != nil && len(rawSamples) > 0 {
+		fp, dur, fpErr := o.fingerprinter.FingerprintInt16(rawSamples, o.rawMusicRate, 2)
 		if fpErr != nil {
 			log.Printf("app: fingerprint: %v", fpErr)
 		} else {
