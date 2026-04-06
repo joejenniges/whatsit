@@ -69,7 +69,9 @@ type Orchestrator struct {
 	rawMusicBuffer []int16 // original stereo int16 for Chromaprint fingerprinting
 	rawMusicRate   int     // sample rate of raw audio
 	rawMusicMu     sync.Mutex
-	musicSamples   int  // total music samples accumulated (not reset on bounce)
+	musicSamples   int    // total music samples accumulated (not reset on bounce)
+	musicMarkerUp  bool   // true if a "Song played" marker is currently showing
+	lastSpeechText string // dedup: skip identical consecutive transcriptions
 	recorder       *audio.SegmentRecorder
 
 	ctx    context.Context
@@ -509,18 +511,20 @@ func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
 	o.endRecorderSegment()
 
 	if from == classifier.ClassMusic && to == classifier.ClassSpeech {
-		// WHY no flushMusicBuffer here: On bouncy stations, music->speech
-		// transitions happen frequently. Flushing the music buffer each time
-		// means we never accumulate enough audio for fingerprinting. The
-		// identifyMusic call is triggered by musicSamples counter instead.
-		// The raw audio buffer keeps accumulating in the tee goroutine.
 		o.transcriber.Reset()
-		o.ui.ClearMusicMarker()
+		o.lastSpeechText = "" // reset dedup on transition
+		// Don't clear the music marker -- it stays until a new one replaces it.
+		// Don't flush music buffer -- let it accumulate for fingerprinting.
 	}
 
 	if from == classifier.ClassSpeech && to == classifier.ClassMusic {
 		o.transcriber.Reset()
-		o.ui.AppendMusic()
+		o.lastSpeechText = ""
+		// Only add a new music marker if we don't already have one showing.
+		if !o.musicMarkerUp {
+			o.ui.AppendMusic()
+			o.musicMarkerUp = true
+		}
 	}
 
 	if from == classifier.ClassSpeech && to == classifier.ClassSilence {
@@ -553,7 +557,8 @@ func (o *Orchestrator) processChunkAs(class classifier.Classification, chunk []f
 		// Non-whisper classifiers use DSP features, so they still need
 		// the rolling window for transcription.
 		if wc, ok := o.classifier.(*classifier.WhisperClassifier); ok {
-			if text := wc.LastText(); text != "" {
+			if text := wc.LastText(); text != "" && text != o.lastSpeechText {
+				o.lastSpeechText = text
 				now := time.Now()
 				entry := &storage.LogEntry{
 					Timestamp: now,
@@ -682,6 +687,8 @@ func (o *Orchestrator) identifyMusic() {
 				}
 				// Replace the "Music playing" placeholder with the actual song.
 				o.ui.AppendSong(song.Title, song.Artist, entry.ID)
+				// Reset so the next song gets a fresh marker.
+				o.musicMarkerUp = false
 				return
 			}
 		}

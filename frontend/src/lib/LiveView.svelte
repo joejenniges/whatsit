@@ -7,7 +7,7 @@
   import ScrollToBottom from './ScrollToBottom.svelte';
   import StatusBar from './StatusBar.svelte';
   import {
-    getEntries, appendEntry, updateEntry, insertAfter,
+    getEntries, appendEntry, updateEntry, removeEntry, insertAfter,
     setEntries, fromLogEntry, subscribe as entriesSub,
     type Entry,
   } from '../stores/entries';
@@ -215,6 +215,16 @@
     });
   }
 
+  async function handleDelete(id: number) {
+    removeEntry(id);
+    try {
+      const { DeleteEntry } = await import('../../wailsjs/go/main/App');
+      await DeleteEntry(id);
+    } catch {
+      // Binding not available
+    }
+  }
+
   async function handleStart() {
     try {
       const { StartStreaming } = await import('../../wailsjs/go/main/App');
@@ -267,6 +277,7 @@
           timestamp={entry.timestamp}
           content={entry.content}
           {regex}
+          ondelete={() => handleDelete(entry.id)}
         />
       {:else}
         <SongLine
@@ -275,8 +286,10 @@
           artist={entry.artist}
           content={entry.content}
           entryType={entry.type}
+          timestamp={entry.timestamp}
           {regex}
           onsave={handleSongSave}
+          ondelete={() => handleDelete(entry.id)}
         />
       {/if}
     {/each}

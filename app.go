@@ -176,6 +176,14 @@ func (a *App) InsertSongEntry() (*storage.LogEntry, error) {
 	return entry, nil
 }
 
+// DeleteEntry removes an entry from the database by ID.
+func (a *App) DeleteEntry(id int64) error {
+	if a.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	return a.db.DeleteEntry(id)
+}
+
 // --- Streaming control bindings ---
 
 // StartStreaming tells the orchestrator to connect to the stream and begin

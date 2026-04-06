@@ -1,15 +1,33 @@
 <script lang="ts">
   import { splitAtMatches, type TextSegment } from '../utils/highlight';
 
-  let { id, title, artist, content, entryType, regex, onsave }: {
+  let { id, title, artist, content, entryType, timestamp, regex, onsave, ondelete }: {
     id: number;
     title: string;
     artist: string;
     content: string;
     entryType: 'song' | 'music_unknown';
+    timestamp: Date;
     regex: RegExp | null;
     onsave: (id: number, title: string, artist: string) => void;
+    ondelete: () => void;
   } = $props();
+
+  let timeStr = $derived(
+    timestamp.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  );
+
+  let confirmDelete = $state(false);
+
+  function handleDelete() {
+    if (confirmDelete) {
+      ondelete();
+      confirmDelete = false;
+    } else {
+      confirmDelete = true;
+      setTimeout(() => { confirmDelete = false; }, 3000);
+    }
+  }
 
   let editing = $state(false);
   let editTitle = $state('');
@@ -70,16 +88,21 @@
       <button class="edit-cancel" onclick={cancel}>Cancel</button>
     </div>
   {:else}
+    <span class="timestamp">[{timeStr}]</span>
+    <span class="music-icon">&#9835;</span>
     <span class="song-text">
-      --- {#each segments as seg}
+      {#each segments as seg}
         {#if seg.matched}
           <mark class="search-match">{seg.text}</mark>
         {:else}
           {seg.text}
         {/if}
-      {/each} ---
+      {/each}
     </span>
     <button class="edit-btn" onclick={startEdit} title="Edit song info">&#9998;</button>
+    <button class="delete-btn" class:confirm={confirmDelete} onclick={handleDelete}>
+      {confirmDelete ? 'Confirm?' : 'x'}
+    </button>
   {/if}
 </div>
 
@@ -95,6 +118,20 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+  .timestamp {
+    color: #666;
+    margin-right: 8px;
+    font-family: monospace;
+    font-size: 12px;
+    user-select: none;
+    flex-shrink: 0;
+  }
+  .music-icon {
+    color: #4a9eff;
+    margin-right: 6px;
+    font-size: 16px;
+    flex-shrink: 0;
   }
   .song-text {
     font-weight: 600;
@@ -157,5 +194,25 @@
   }
   .edit-cancel:hover {
     background: rgba(255, 255, 255, 0.05);
+  }
+  .delete-btn {
+    opacity: 0;
+    background: none;
+    border: 1px solid #555;
+    color: #888;
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity 0.15s;
+  }
+  .song:hover .delete-btn {
+    opacity: 1;
+  }
+  .delete-btn.confirm {
+    opacity: 1;
+    border-color: #e74c3c;
+    color: #e74c3c;
   }
 </style>

@@ -51,6 +51,11 @@ export function updateEntry(id: number, updates: Partial<Entry>) {
   notify();
 }
 
+export function removeEntry(id: number) {
+  _entries = _entries.filter(e => e.id !== id);
+  notify();
+}
+
 export function insertAfter(afterId: number, entry: Entry) {
   const idx = _entries.findIndex(e => e.id === afterId);
   if (idx === -1) {

@@ -171,6 +171,15 @@ func (d *Database) UpdateEntrySong(id int64, title, artist string) error {
 	return nil
 }
 
+// DeleteEntry removes a log entry by ID.
+func (d *Database) DeleteEntry(id int64) error {
+	_, err := d.db.Exec(`DELETE FROM log_entries WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete entry: %w", err)
+	}
+	return nil
+}
+
 // nullString returns a sql.NullString that is valid only if s is non-empty.
 func nullString(s string) sql.NullString {
 	if s == "" {
