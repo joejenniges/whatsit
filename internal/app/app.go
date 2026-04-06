@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log"
+	"os"
 	"path/filepath"
 	"runtime/debug"
 	"sync"
@@ -61,6 +62,7 @@ type Orchestrator struct {
 	listener *audio.Listener
 
 	musicBuffer *audio.Buffer
+	recorder    *audio.SegmentRecorder
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -138,6 +140,20 @@ func (o *Orchestrator) Start() {
 
 // finishInit loads the whisper model, sets up callbacks, and switches to the main screen.
 func (o *Orchestrator) finishInit(modelPath string) {
+	// Initialize audio segment recorder and clean up old files.
+	appDir, err := config.AppDir()
+	if err != nil {
+		log.Fatalf("app: resolve app directory: %v", err)
+	}
+	audioDir := filepath.Join(appDir, "audio")
+	if err := os.MkdirAll(audioDir, 0o755); err != nil {
+		log.Fatalf("app: create audio directory: %v", err)
+	}
+	o.recorder = audio.NewSegmentRecorder(audioDir, whisperSampleRate)
+
+	// Clean up audio files older than 24 hours in the background.
+	go audio.CleanupOldAudio(audioDir, 24*time.Hour)
+
 	lang := o.config.Language
 	if lang == "" {
 		lang = "en"
@@ -180,7 +196,17 @@ func (o *Orchestrator) finishInit(modelPath string) {
 	if tier == "" {
 		tier = "scheirer"
 	}
-	o.classifier = classifier.NewClassifier(tier, whisperSampleRate, o.config.ClassifierDebug)
+	if tier == "whisper" {
+		// WHY callback: The classifier package can't import the transcriber
+		// package (circular dep), so we inject whisper via a callback.
+		wc := classifier.NewWhisperClassifier(func(samples []float32) (string, float32, error) {
+			return o.transcriber.ClassifyChunk(samples)
+		})
+		wc.Debug = o.config.ClassifierDebug
+		o.classifier = wc
+	} else {
+		o.classifier = classifier.NewClassifier(tier, whisperSampleRate, o.config.ClassifierDebug)
+	}
 	log.Printf("app: classifier tier: %s (%s)", tier, o.classifier.Name())
 
 	// Wire UI callbacks.
@@ -313,40 +339,85 @@ func (o *Orchestrator) processingLoop() {
 
 		switch class {
 		case classifier.ClassSpeech:
-			// Transitioning from music -> speech: flush music buffer and
-			// reset the transcriber's rolling window for a fresh start.
+			// Transitioning from music -> speech: flush music buffer,
+			// end the music segment, and reset the transcriber.
 			if lastClass == classifier.ClassMusic {
+				o.endRecorderSegment()
 				o.flushMusicBuffer()
 				o.transcriber.Reset()
 				o.ui.ClearMusicMarker()
 			}
+
+			// Start a speech segment if not already recording one.
+			if _, err := o.recorder.StartSegment("speech"); err != nil {
+				log.Printf("app: start speech segment: %v", err)
+			}
 			silenceSamples = 0
 
-			// Feed directly to transcriber's rolling window.
-			text, triggered, err := o.transcriber.FeedChunk(chunk)
-			if err != nil {
-				log.Printf("app: transcribe: %v", err)
-			} else if triggered && text != "" {
-				now := time.Now()
-				entry := &storage.LogEntry{
-					Timestamp: now,
-					EntryType: "speech",
-					Content:   text,
+			// Record audio to WAV.
+			if err := o.recorder.Write(chunk); err != nil {
+				log.Printf("app: write speech audio: %v", err)
+			}
+
+			// WHY two paths: The whisper classifier already ran inference
+			// to classify the audio, so it has the transcription text.
+			// Re-transcribing through the rolling window would waste CPU.
+			// Non-whisper classifiers use DSP features, so they still need
+			// the rolling window for transcription.
+			if wc, ok := o.classifier.(*classifier.WhisperClassifier); ok {
+				if text := wc.LastText(); text != "" {
+					now := time.Now()
+					entry := &storage.LogEntry{
+						Timestamp: now,
+						EntryType: "speech",
+						Content:   text,
+						AudioPath: o.recorder.CurrentPath(),
+					}
+					if dbErr := o.db.InsertEntry(entry); dbErr != nil {
+						log.Printf("app: insert speech entry: %v", dbErr)
+					}
+					o.ui.AppendTranscription(now, text)
 				}
-				if dbErr := o.db.InsertEntry(entry); dbErr != nil {
-					log.Printf("app: insert speech entry: %v", dbErr)
+			} else {
+				// Non-whisper classifier: feed to rolling window as before.
+				text, triggered, err := o.transcriber.FeedChunk(chunk)
+				if err != nil {
+					log.Printf("app: transcribe: %v", err)
+				} else if triggered && text != "" {
+					now := time.Now()
+					entry := &storage.LogEntry{
+						Timestamp: now,
+						EntryType: "speech",
+						Content:   text,
+						AudioPath: o.recorder.CurrentPath(),
+					}
+					if dbErr := o.db.InsertEntry(entry); dbErr != nil {
+						log.Printf("app: insert speech entry: %v", dbErr)
+					}
+					o.ui.AppendTranscription(now, text)
 				}
-				o.ui.AppendTranscription(now, text)
 			}
 
 		case classifier.ClassMusic:
-			// Transitioning from speech -> music: reset transcriber window,
-			// show a single "Music playing" marker in the UI.
+			// Transitioning from speech -> music: end the speech segment,
+			// reset transcriber window, show "Music playing" marker.
 			if lastClass == classifier.ClassSpeech {
+				o.endRecorderSegment()
 				o.transcriber.Reset()
 				o.ui.AppendMusic() // Shows once; subsequent calls are no-ops.
 			}
+
+			// Start a music segment if not already recording one.
+			if _, err := o.recorder.StartSegment("music"); err != nil {
+				log.Printf("app: start music segment: %v", err)
+			}
 			silenceSamples = 0
+
+			// Record audio to WAV.
+			if err := o.recorder.Write(chunk); err != nil {
+				log.Printf("app: write music audio: %v", err)
+			}
+
 			o.musicBuffer.Write(chunk)
 
 			if o.musicBuffer.Duration(whisperSampleRate) >= 15*time.Second {
@@ -357,6 +428,7 @@ func (o *Orchestrator) processingLoop() {
 			silenceSamples += len(chunk)
 			// Flush on long silence (>5s).
 			if silenceSamples > whisperSampleRate*5 {
+				o.endRecorderSegment()
 				o.transcriber.Reset()
 				o.flushMusicBuffer()
 				silenceSamples = 0
@@ -371,6 +443,7 @@ func (o *Orchestrator) processingLoop() {
 	}
 
 	// Channel closed -- streamer/decoder/resampler pipeline ended.
+	o.endRecorderSegment()
 	o.transcriber.Reset()
 	o.flushMusicBuffer()
 	o.ui.UpdateStatus(false, "disconnected")
@@ -421,6 +494,7 @@ func (o *Orchestrator) identifyMusic() {
 					Album:      song.Album,
 					Confidence: song.Score,
 					DurationMs: durationMs,
+					AudioPath:  o.recorder.CurrentPath(),
 				}
 				if err := o.db.InsertEntry(entry); err != nil {
 					log.Printf("app: insert song entry: %v", err)
@@ -438,9 +512,22 @@ func (o *Orchestrator) identifyMusic() {
 		Timestamp:  time.Now(),
 		EntryType:  "music_unknown",
 		DurationMs: durationMs,
+		AudioPath:  o.recorder.CurrentPath(),
 	}
 	if err := o.db.InsertEntry(entry); err != nil {
 		log.Printf("app: insert music entry: %v", err)
+	}
+}
+
+// endRecorderSegment closes the current audio segment file.
+func (o *Orchestrator) endRecorderSegment() {
+	if o.recorder == nil {
+		return
+	}
+	if path, err := o.recorder.EndSegment(); err != nil {
+		log.Printf("app: end audio segment: %v", err)
+	} else if path != "" {
+		log.Printf("app: saved audio segment: %s", path)
 	}
 }
 

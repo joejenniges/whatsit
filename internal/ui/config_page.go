@@ -75,7 +75,7 @@ func NewConfigPage(cfg *config.Config, onSave func(*config.Config)) *ConfigPage 
 
 	// Classifier Tier
 	cp.classifierSelect = widget.NewSelect(
-		[]string{"basic", "scheirer", "mfcc"},
+		[]string{"basic", "scheirer", "mfcc", "whisper"},
 		nil,
 	)
 	cp.classifierSelect.SetSelected(cfg.ClassifierTier)

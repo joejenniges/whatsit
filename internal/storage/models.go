@@ -14,4 +14,5 @@ type LogEntry struct {
 	Album      string  // populated for songs
 	Confidence float64 // whisper confidence or acoustid score
 	DurationMs int64   // segment duration in milliseconds
+	AudioPath  string  // path to WAV file for this segment
 }

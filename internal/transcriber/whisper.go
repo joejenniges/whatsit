@@ -154,6 +154,71 @@ func (t *Transcriber) Transcribe(samples []float32) (string, error) {
 	return result, nil
 }
 
+// ClassifyChunk runs a single-shot whisper inference and returns the raw text
+// and average token probability. Used by the whisper classifier tier to
+// determine if audio is speech or music.
+//
+// WHY separate from Transcribe: Transcribe filters out hallucinations, but
+// the whisper classifier NEEDS to see those markers (e.g., [Music]) to make
+// classification decisions. ClassifyChunk returns the raw, unfiltered text
+// and the average probability so the classifier can apply its own logic.
+func (t *Transcriber) ClassifyChunk(samples []float32) (string, float32, error) {
+	if len(samples) == 0 {
+		return "", 0, nil
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.ctx == nil {
+		return "", 0, fmt.Errorf("transcriber is closed")
+	}
+
+	cLang := C.CString(t.config.Language)
+	defer C.free(unsafe.Pointer(cLang))
+
+	// WHY make_params (not make_params_rolling): These are independent
+	// classification chunks with no continuity between them.
+	params := C.make_params(C.int(t.config.Threads), cLang)
+
+	ret := C.whisper_full(t.ctx, params, (*C.float)(&samples[0]), C.int(len(samples)))
+	if ret != 0 {
+		return "", 0, fmt.Errorf("whisper_full failed with code %d", int(ret))
+	}
+
+	nSegments := int(C.whisper_full_n_segments(t.ctx))
+	if nSegments == 0 {
+		return "", 0, nil
+	}
+
+	var parts []string
+	var totalProb float32
+	var totalTokens int
+
+	for i := 0; i < nSegments; i++ {
+		text := C.GoString(C.whisper_full_get_segment_text(t.ctx, C.int(i)))
+		text = strings.TrimSpace(text)
+		if text != "" {
+			parts = append(parts, text)
+		}
+
+		// Accumulate token probabilities across all segments.
+		nTokens := int(C.whisper_full_n_tokens(t.ctx, C.int(i)))
+		for j := 0; j < nTokens; j++ {
+			totalProb += float32(C.whisper_full_get_token_p(t.ctx, C.int(i), C.int(j)))
+			totalTokens++
+		}
+	}
+
+	var avgProb float32
+	if totalTokens > 0 {
+		avgProb = totalProb / float32(totalTokens)
+	}
+
+	result := strings.TrimSpace(strings.Join(parts, " "))
+	return result, avgProb, nil
+}
+
 // Close releases the whisper context. Safe to call multiple times.
 func (t *Transcriber) Close() {
 	t.mu.Lock()

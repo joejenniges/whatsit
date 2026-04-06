@@ -23,6 +23,9 @@ type AudioClassifier interface {
 // NewClassifier creates a classifier for the given tier.
 // Valid tiers: "basic", "scheirer", "mfcc".
 // Default (empty string or unknown): "scheirer".
+//
+// Note: "whisper" tier cannot be created here because it requires a callback.
+// The orchestrator creates it directly via NewWhisperClassifier.
 // When debug is true, the classifier logs raw feature values to stderr
 // after each Classify() call.
 func NewClassifier(tier string, sampleRate int, debug bool) AudioClassifier {
@@ -39,6 +42,11 @@ func NewClassifier(tier string, sampleRate int, debug bool) AudioClassifier {
 		c := NewMFCCClassifier(sampleRate)
 		c.Debug = debug
 		return c
+	case "whisper":
+		// WHY nil: Whisper classifier needs a WhisperClassifyFunc callback
+		// that wraps the transcriber. The orchestrator creates it directly
+		// via NewWhisperClassifier and injects the callback.
+		return nil
 	default:
 		// WHY: scheirer is the best cost/accuracy tradeoff for radio audio.
 		// It implements the Scheirer & Slaney (1997) 4-feature approach

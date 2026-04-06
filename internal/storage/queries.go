@@ -17,17 +17,18 @@ func (d *Database) InsertEntry(entry *LogEntry) error {
 
 	if entry.Timestamp.IsZero() {
 		res, err = d.db.Exec(`
-			INSERT INTO log_entries (entry_type, content, artist, title, album, confidence, duration_ms)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			INSERT INTO log_entries (entry_type, content, artist, title, album, confidence, duration_ms, audio_path)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			entry.EntryType, entry.Content, entry.Artist, entry.Title,
-			entry.Album, entry.Confidence, entry.DurationMs,
+			entry.Album, entry.Confidence, entry.DurationMs, nullString(entry.AudioPath),
 		)
 	} else {
 		res, err = d.db.Exec(`
-			INSERT INTO log_entries (timestamp, entry_type, content, artist, title, album, confidence, duration_ms)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			INSERT INTO log_entries (timestamp, entry_type, content, artist, title, album, confidence, duration_ms, audio_path)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			entry.Timestamp.UTC().Format(time.DateTime), entry.EntryType, entry.Content,
 			entry.Artist, entry.Title, entry.Album, entry.Confidence, entry.DurationMs,
+			nullString(entry.AudioPath),
 		)
 	}
 
@@ -46,7 +47,7 @@ func (d *Database) InsertEntry(entry *LogEntry) error {
 // GetRecentEntries returns the most recent entries ordered newest-first.
 func (d *Database) GetRecentEntries(limit int) ([]LogEntry, error) {
 	rows, err := d.db.Query(`
-		SELECT id, timestamp, entry_type, content, artist, title, album, confidence, duration_ms
+		SELECT id, timestamp, entry_type, content, artist, title, album, confidence, duration_ms, audio_path
 		FROM log_entries
 		ORDER BY timestamp DESC, id DESC
 		LIMIT ?`, limit)
@@ -60,7 +61,7 @@ func (d *Database) GetRecentEntries(limit int) ([]LogEntry, error) {
 // GetEntriesByType returns entries matching the given type, newest-first.
 func (d *Database) GetEntriesByType(entryType string, limit int) ([]LogEntry, error) {
 	rows, err := d.db.Query(`
-		SELECT id, timestamp, entry_type, content, artist, title, album, confidence, duration_ms
+		SELECT id, timestamp, entry_type, content, artist, title, album, confidence, duration_ms, audio_path
 		FROM log_entries
 		WHERE entry_type = ?
 		ORDER BY timestamp DESC, id DESC
@@ -76,7 +77,7 @@ func (d *Database) GetEntriesByType(entryType string, limit int) ([]LogEntry, er
 // ordered oldest-first (chronological).
 func (d *Database) GetEntriesBetween(start, end time.Time) ([]LogEntry, error) {
 	rows, err := d.db.Query(`
-		SELECT id, timestamp, entry_type, content, artist, title, album, confidence, duration_ms
+		SELECT id, timestamp, entry_type, content, artist, title, album, confidence, duration_ms, audio_path
 		FROM log_entries
 		WHERE timestamp >= ? AND timestamp <= ?
 		ORDER BY timestamp ASC, id ASC`,
@@ -103,9 +104,10 @@ func scanEntries(rows *sql.Rows) ([]LogEntry, error) {
 			album      sql.NullString
 			confidence sql.NullFloat64
 			durationMs sql.NullInt64
+			audioPath  sql.NullString
 		)
 		if err := rows.Scan(&e.ID, &ts, &e.EntryType, &content, &artist,
-			&title, &album, &confidence, &durationMs); err != nil {
+			&title, &album, &confidence, &durationMs, &audioPath); err != nil {
 			return nil, fmt.Errorf("scan log entry: %w", err)
 		}
 
@@ -123,6 +125,7 @@ func scanEntries(rows *sql.Rows) ([]LogEntry, error) {
 		e.Album = album.String
 		e.Confidence = confidence.Float64
 		e.DurationMs = durationMs.Int64
+		e.AudioPath = audioPath.String
 
 		entries = append(entries, e)
 	}
@@ -133,7 +136,7 @@ func scanEntries(rows *sql.Rows) ([]LogEntry, error) {
 // (case-insensitive LIKE), ordered newest-first, limited to limit rows.
 func (d *Database) SearchEntries(query string, limit int) ([]LogEntry, error) {
 	rows, err := d.db.Query(`
-		SELECT id, timestamp, entry_type, content, artist, title, album, confidence, duration_ms
+		SELECT id, timestamp, entry_type, content, artist, title, album, confidence, duration_ms, audio_path
 		FROM log_entries
 		WHERE content LIKE '%' || ? || '%'
 		ORDER BY timestamp DESC, id DESC
@@ -143,6 +146,14 @@ func (d *Database) SearchEntries(query string, limit int) ([]LogEntry, error) {
 	}
 	defer rows.Close()
 	return scanEntries(rows)
+}
+
+// nullString returns a sql.NullString that is valid only if s is non-empty.
+func nullString(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: s, Valid: true}
 }
 
 // parseTimestamp tries common SQLite datetime formats.
