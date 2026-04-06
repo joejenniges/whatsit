@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/joe/radio-transcriber/internal/config"
@@ -18,8 +19,10 @@ type WailsUI struct {
 	ctx  context.Context // Wails runtime context, set after startup
 	done chan struct{}    // closed on shutdown to unblock Run()
 
+	mu               sync.Mutex
+	musicMarkerShown bool // dedup: only emit one music-detected per segment
+
 	// Callbacks set by the orchestrator via Set*Callback methods.
-	// The App struct calls these in response to frontend bindings.
 	onStart    func()
 	onStop     func()
 	onSave     func(*config.Config)
@@ -132,6 +135,11 @@ func (w *WailsUI) AppendSong(title, artist string, dbID int64) {
 	if w.ctx == nil {
 		return
 	}
+	// Reset marker so the next song gets a fresh one.
+	w.mu.Lock()
+	w.musicMarkerShown = false
+	w.mu.Unlock()
+
 	wailsRuntime.EventsEmit(w.ctx, "song-identified", map[string]interface{}{
 		"id":     dbID,
 		"title":  title,
@@ -153,6 +161,14 @@ func (w *WailsUI) AppendMusic() {
 	if w.ctx == nil {
 		return
 	}
+	w.mu.Lock()
+	if w.musicMarkerShown {
+		w.mu.Unlock()
+		return
+	}
+	w.musicMarkerShown = true
+	w.mu.Unlock()
+
 	wailsRuntime.EventsEmit(w.ctx, "music-detected", map[string]interface{}{})
 }
 
@@ -160,6 +176,9 @@ func (w *WailsUI) ClearMusicMarker() {
 	if w.ctx == nil {
 		return
 	}
+	w.mu.Lock()
+	w.musicMarkerShown = false
+	w.mu.Unlock()
 	wailsRuntime.EventsEmit(w.ctx, "music-cleared", map[string]interface{}{})
 }
 

@@ -1,11 +1,15 @@
 <script lang="ts">
   import { splitAtMatches, type TextSegment } from '../utils/highlight';
 
-  let { timestamp, content, regex, ondelete }: {
+  let { id, timestamp, content, regex, ondelete, onedit, selected, ontoggleselect }: {
+    id: number;
     timestamp: Date;
     content: string;
     regex: RegExp | null;
     ondelete: () => void;
+    onedit: (id: number, content: string) => void;
+    selected: boolean;
+    ontoggleselect: (id: number, shiftKey: boolean) => void;
   } = $props();
 
   let timeStr = $derived(
@@ -14,6 +18,8 @@
 
   let segments: TextSegment[] = $derived(splitAtMatches(content, regex));
   let confirmDelete = $state(false);
+  let editing = $state(false);
+  let editText = $state('');
 
   function handleDelete() {
     if (confirmDelete) {
@@ -24,22 +30,63 @@
       setTimeout(() => { confirmDelete = false; }, 3000);
     }
   }
+
+  function startEdit() {
+    editText = content;
+    editing = true;
+  }
+
+  function saveEdit() {
+    const trimmed = editText.trim();
+    if (trimmed && trimmed !== content) {
+      onedit(id, trimmed);
+    }
+    editing = false;
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') saveEdit();
+    if (e.key === 'Escape') editing = false;
+  }
+
+  function handleClick(e: MouseEvent) {
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      ontoggleselect(id, e.shiftKey);
+    }
+  }
 </script>
 
-<div class="entry speech">
-  <span class="timestamp">[{timeStr}]</span>
-  <span class="content">
-    {#each segments as seg}
-      {#if seg.matched}
-        <mark class="search-match">{seg.text}</mark>
-      {:else}
-        {seg.text}
-      {/if}
-    {/each}
-  </span>
-  <button class="delete-btn" class:confirm={confirmDelete} onclick={handleDelete}>
-    {confirmDelete ? 'Confirm?' : 'x'}
-  </button>
+<div
+  class="entry speech"
+  class:selected
+  onclick={handleClick}
+  role="listitem"
+>
+  {#if editing}
+    <span class="timestamp">[{timeStr}]</span>
+    <input
+      class="edit-input"
+      type="text"
+      bind:value={editText}
+      onblur={saveEdit}
+      onkeydown={handleKeydown}
+    />
+  {:else}
+    <span class="timestamp">[{timeStr}]</span>
+    <span class="content" ondblclick={startEdit}>
+      {#each segments as seg}
+        {#if seg.matched}
+          <mark class="search-match">{seg.text}</mark>
+        {:else}
+          {seg.text}
+        {/if}
+      {/each}
+    </span>
+    <button class="delete-btn" class:confirm={confirmDelete} onclick={(e) => { e.stopPropagation(); handleDelete(); }}>
+      {confirmDelete ? 'Confirm?' : 'x'}
+    </button>
+  {/if}
 </div>
 
 <style>
@@ -51,9 +98,15 @@
     display: flex;
     align-items: baseline;
     position: relative;
+    cursor: default;
+    user-select: text;
   }
   .speech {
     background: rgba(255, 255, 255, 0.03);
+  }
+  .speech.selected {
+    background: rgba(74, 158, 255, 0.15);
+    outline: 1px solid rgba(74, 158, 255, 0.3);
   }
   .timestamp {
     color: #666;
@@ -66,6 +119,19 @@
   .content {
     word-break: break-word;
     flex: 1;
+  }
+  .edit-input {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    border-radius: 3px;
+    color: #e0e0e0;
+    padding: 3px 6px;
+    font-size: 14px;
+    outline: none;
+  }
+  .edit-input:focus {
+    border-color: #4a9eff;
   }
   .delete-btn {
     opacity: 0;

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -99,6 +100,8 @@ func (c *AcoustIDClient) Identify(fingerprint string, duration int) (*SongInfo, 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("acoustid: HTTP %d: %s", resp.StatusCode, string(body))
 	}
+
+	log.Printf("acoustid: raw response: %s", string(body[:min(500, len(body))]))
 
 	var result acoustIDResponse
 	if err := json.Unmarshal(body, &result); err != nil {

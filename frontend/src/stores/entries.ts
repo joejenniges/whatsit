@@ -17,6 +17,7 @@ export interface Entry {
 // but in plain .ts files we need to export mutable references that components
 // can import. We use a simple array and mutation functions.
 let _entries: Entry[] = [];
+let _selected: Set<number> = new Set();
 let _listeners: Array<() => void> = [];
 
 function notify() {
@@ -53,6 +54,53 @@ export function updateEntry(id: number, updates: Partial<Entry>) {
 
 export function removeEntry(id: number) {
   _entries = _entries.filter(e => e.id !== id);
+  _selected.delete(id);
+  notify();
+}
+
+export function removeEntries(ids: number[]) {
+  const idSet = new Set(ids);
+  _entries = _entries.filter(e => !idSet.has(e.id));
+  for (const id of ids) _selected.delete(id);
+  notify();
+}
+
+export function isSelected(id: number): boolean {
+  return _selected.has(id);
+}
+
+export function getSelected(): Set<number> {
+  return _selected;
+}
+
+export function getSelectedEntries(): Entry[] {
+  return _entries.filter(e => _selected.has(e.id));
+}
+
+export function toggleSelect(id: number, shiftKey: boolean) {
+  if (shiftKey && _selected.size > 0) {
+    // Shift+click: select range from last selected to this one
+    const lastId = Array.from(_selected).pop()!;
+    const lastIdx = _entries.findIndex(e => e.id === lastId);
+    const thisIdx = _entries.findIndex(e => e.id === id);
+    if (lastIdx !== -1 && thisIdx !== -1) {
+      const [start, end] = lastIdx < thisIdx ? [lastIdx, thisIdx] : [thisIdx, lastIdx];
+      for (let i = start; i <= end; i++) {
+        _selected.add(_entries[i].id);
+      }
+    }
+  } else {
+    if (_selected.has(id)) {
+      _selected.delete(id);
+    } else {
+      _selected.add(id);
+    }
+  }
+  notify();
+}
+
+export function clearSelection() {
+  _selected = new Set();
   notify();
 }
 

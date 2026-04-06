@@ -69,10 +69,9 @@ type Orchestrator struct {
 	rawMusicBuffer []int16 // original stereo int16 for Chromaprint fingerprinting
 	rawMusicRate   int     // sample rate of raw audio
 	rawMusicMu     sync.Mutex
-	musicSamples   int    // total music samples accumulated (not reset on bounce)
-	musicMarkerUp  bool   // true if a "Song played" marker is currently showing
-	lastSpeechText string // dedup: skip identical consecutive transcriptions
-	recorder       *audio.SegmentRecorder
+	musicSamples  int  // total music samples accumulated (not reset on bounce)
+	musicMarkerUp bool // true if a "Song played" marker is currently showing
+	recorder      *audio.SegmentRecorder
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -512,14 +511,12 @@ func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
 
 	if from == classifier.ClassMusic && to == classifier.ClassSpeech {
 		o.transcriber.Reset()
-		o.lastSpeechText = "" // reset dedup on transition
 		// Don't clear the music marker -- it stays until a new one replaces it.
 		// Don't flush music buffer -- let it accumulate for fingerprinting.
 	}
 
 	if from == classifier.ClassSpeech && to == classifier.ClassMusic {
 		o.transcriber.Reset()
-		o.lastSpeechText = ""
 		// Only add a new music marker if we don't already have one showing.
 		if !o.musicMarkerUp {
 			o.ui.AppendMusic()
@@ -557,8 +554,7 @@ func (o *Orchestrator) processChunkAs(class classifier.Classification, chunk []f
 		// Non-whisper classifiers use DSP features, so they still need
 		// the rolling window for transcription.
 		if wc, ok := o.classifier.(*classifier.WhisperClassifier); ok {
-			if text := wc.LastText(); text != "" && text != o.lastSpeechText {
-				o.lastSpeechText = text
+			if text := wc.ConsumeText(); text != "" {
 				now := time.Now()
 				entry := &storage.LogEntry{
 					Timestamp: now,
@@ -662,7 +658,7 @@ func (o *Orchestrator) identifyMusic() {
 		if fpErr != nil {
 			log.Printf("app: fingerprint error: %v", fpErr)
 		} else {
-			log.Printf("app: fingerprint OK, duration=%ds, fp_len=%d, sending to AcoustID", dur, len(fp))
+			log.Printf("app: fingerprint OK, duration=%ds, fp_len=%d, fp_prefix=%s, sending to AcoustID", dur, len(fp), fp[:min(60, len(fp))])
 			song, lookupErr := o.acoustidClient.Identify(fp, dur)
 			if lookupErr != nil {
 				log.Printf("app: acoustid lookup error: %v", lookupErr)

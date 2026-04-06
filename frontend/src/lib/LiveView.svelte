@@ -7,8 +7,10 @@
   import ScrollToBottom from './ScrollToBottom.svelte';
   import StatusBar from './StatusBar.svelte';
   import {
-    getEntries, appendEntry, updateEntry, removeEntry, insertAfter,
-    setEntries, fromLogEntry, subscribe as entriesSub,
+    getEntries, appendEntry, updateEntry, removeEntry, removeEntries,
+    insertAfter, setEntries, fromLogEntry,
+    isSelected, getSelectedEntries, toggleSelect, clearSelection,
+    subscribe as entriesSub,
     type Entry,
   } from '../stores/entries';
   import {
@@ -225,6 +227,72 @@
     }
   }
 
+  async function handleEditContent(id: number, content: string) {
+    updateEntry(id, { content });
+    try {
+      const { UpdateEntryContent } = await import('../../wailsjs/go/main/App');
+      await UpdateEntryContent(id, content);
+    } catch {
+      // Binding not available
+    }
+  }
+
+  function handleToggleSelect(id: number, shiftKey: boolean) {
+    toggleSelect(id, shiftKey);
+  }
+
+  async function handleBulkDelete() {
+    const selected = getSelectedEntries();
+    if (selected.length === 0) return;
+    const ids = selected.map(e => e.id);
+    removeEntries(ids);
+    clearSelection();
+    try {
+      const { DeleteEntry } = await import('../../wailsjs/go/main/App');
+      for (const id of ids) {
+        await DeleteEntry(id);
+      }
+    } catch {
+      // Binding not available
+    }
+  }
+
+  function handleCopySelected() {
+    const selected = getSelectedEntries();
+    if (selected.length === 0) return;
+    const text = selected.map(e => {
+      const ts = e.timestamp.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      if (e.type === 'speech') return `[${ts}] ${e.content}`;
+      if (e.title && e.artist) return `[${ts}] ${e.title} - ${e.artist}`;
+      return `[${ts}] ${e.content || 'Song played'}`;
+    }).join('\n');
+    navigator.clipboard.writeText(text);
+    clearSelection();
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    // Ctrl+A: select all visible entries
+    if ((e.ctrlKey || e.metaKey) && e.key === 'a' && document.activeElement?.tagName !== 'INPUT') {
+      e.preventDefault();
+      for (const entry of visibleEntries) {
+        toggleSelect(entry.id, false);
+      }
+    }
+    // Delete/Backspace: delete selected
+    if ((e.key === 'Delete' || e.key === 'Backspace') && getSelectedEntries().length > 0 && document.activeElement?.tagName !== 'INPUT') {
+      e.preventDefault();
+      handleBulkDelete();
+    }
+    // Ctrl+C: copy selected
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c' && getSelectedEntries().length > 0) {
+      handleCopySelected();
+    }
+    // Escape: clear selection
+    if (e.key === 'Escape') {
+      clearSelection();
+    }
+  }
+
   async function handleStart() {
     try {
       const { StartStreaming } = await import('../../wailsjs/go/main/App');
@@ -256,7 +324,17 @@
   }
 </script>
 
-<div class="live-view">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="live-view" onkeydown={handleKeydown} tabindex="-1">
+  {#if getSelectedEntries().length > 0}
+    <div class="selection-toolbar">
+      <span>{getSelectedEntries().length} selected</span>
+      <button onclick={handleCopySelected}>Copy</button>
+      <button class="danger" onclick={handleBulkDelete}>Delete</button>
+      <button onclick={() => clearSelection()}>Clear</button>
+    </div>
+  {/if}
+
   <SearchBar
     {query}
     {filterActive}
@@ -274,10 +352,14 @@
 
       {#if entry.type === 'speech'}
         <TranscriptLine
+          id={entry.id}
           timestamp={entry.timestamp}
           content={entry.content}
           {regex}
+          selected={isSelected(entry.id)}
+          ontoggleselect={handleToggleSelect}
           ondelete={() => handleDelete(entry.id)}
+          onedit={handleEditContent}
         />
       {:else}
         <SongLine
@@ -346,5 +428,34 @@
     color: #555;
     padding: 40px 20px;
     font-size: 14px;
+  }
+  .selection-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: rgba(74, 158, 255, 0.12);
+    border-bottom: 1px solid rgba(74, 158, 255, 0.2);
+    font-size: 13px;
+    color: #ccc;
+  }
+  .selection-toolbar button {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #e0e0e0;
+    padding: 3px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .selection-toolbar button:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+  .selection-toolbar button.danger {
+    border-color: rgba(231, 76, 60, 0.4);
+    color: #e74c3c;
+  }
+  .selection-toolbar button.danger:hover {
+    background: rgba(231, 76, 60, 0.15);
   }
 </style>

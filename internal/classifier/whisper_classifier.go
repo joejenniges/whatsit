@@ -121,10 +121,13 @@ func (c *WhisperClassifier) Classify(samples []float32) ClassifyResult {
 // Name returns the classifier tier name.
 func (c *WhisperClassifier) Name() string { return "whisper" }
 
-// LastText returns the transcription text from the most recent Classify call
-// that returned ClassSpeech. Empty if the last call returned music/silence.
-func (c *WhisperClassifier) LastText() string {
-	return c.lastText
+// ConsumeText returns the transcription text from the most recent Classify call
+// that returned ClassSpeech, then clears it so it's only consumed once.
+// Returns empty if the last call returned music/silence or text was already consumed.
+func (c *WhisperClassifier) ConsumeText() string {
+	t := c.lastText
+	c.lastText = ""
+	return t
 }
 
 // isWhisperMusicOutput returns true if whisper's output indicates music rather
