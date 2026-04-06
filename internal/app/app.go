@@ -654,8 +654,11 @@ func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
 
 	if from == classifier.ClassMusic && to == classifier.ClassSpeech {
 		o.transcriber.Reset()
-		o.musicMarkerUp = false
-		o.musicDBLogged = false
+		// WHY NOT reset musicMarkerUp/musicDBLogged here: the whisper classifier
+		// bounces music->speech->music every ~4 seconds on vocal music. Resetting
+		// here would cause a new "Song played" marker on every bounce. Only reset
+		// when we get actual transcribed speech (in flushSpeechBuffer) or on
+		// silence (real end of segment).
 	}
 
 	if from == classifier.ClassSpeech && to == classifier.ClassMusic {
@@ -672,6 +675,9 @@ func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
 		// Flush speech buffer -- the speaker stopped talking.
 		o.flushSpeechBuffer()
 		o.transcriber.Reset()
+		// Silence is a real end of segment -- reset music flags.
+		o.musicMarkerUp = false
+		o.musicDBLogged = false
 	}
 
 	if from == classifier.ClassMusic && to == classifier.ClassSilence {
@@ -793,6 +799,11 @@ func (o *Orchestrator) flushSpeechBuffer() {
 		log.Printf("app: insert speech entry: %v", dbErr)
 	}
 	o.ui.AppendTranscription(now, text, entry.ID)
+
+	// Real speech was transcribed -- reset music flags so the next song
+	// gets a fresh marker and DB entry.
+	o.musicMarkerUp = false
+	o.musicDBLogged = false
 }
 
 // flushMusicBuffer identifies whatever is in the music buffer.
