@@ -73,6 +73,7 @@ type Orchestrator struct {
 	musicSamples  int  // total music samples accumulated (not reset on bounce)
 	musicMarkerUp bool // true if a "Song played" marker is currently showing
 	musicDBLogged bool // true if we've already written a music_unknown DB entry for this segment
+	listenWanted  bool // true if user checked Listen before streaming started
 	recorder      *audio.SegmentRecorder
 
 	ctx    context.Context
@@ -279,6 +280,7 @@ func (o *Orchestrator) finishInit(modelPath string) {
 	o.ui.SetListenCallback(func(enabled bool) {
 		o.mu.Lock()
 		defer o.mu.Unlock()
+		o.listenWanted = enabled
 		if o.listener != nil {
 			o.listener.SetEnabled(enabled)
 		}
@@ -389,6 +391,7 @@ func (o *Orchestrator) finishInitParakeet(modelPath, vocabPath string) {
 	o.ui.SetListenCallback(func(enabled bool) {
 		o.mu.Lock()
 		defer o.mu.Unlock()
+		o.listenWanted = enabled
 		if o.listener != nil {
 			o.listener.SetEnabled(enabled)
 		}
@@ -474,6 +477,11 @@ func (o *Orchestrator) startStreaming() {
 			log.Printf("app: listener unavailable, listen feature disabled: %v", listenErr)
 		} else {
 			o.listener = listener
+			// Apply the listen state the user set before streaming started.
+			if o.listenWanted {
+				o.listener.SetEnabled(true)
+				log.Printf("app: listener auto-enabled (was requested before start)")
+			}
 		}
 	}
 
