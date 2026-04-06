@@ -65,6 +65,7 @@ type Orchestrator struct {
 	// pipeline -- pre-resampling so the user hears full-quality stereo audio.
 	listener *audio.Listener
 
+	speechBuffer   *audio.Buffer // segment mode: accumulate speech, transcribe on transition
 	musicBuffer    *audio.Buffer
 	rawMusicBuffer []int16 // original stereo int16 for Chromaprint fingerprinting
 	rawMusicRate   int     // sample rate of raw audio
@@ -381,8 +382,8 @@ func (o *Orchestrator) startStreaming() {
 	o.resampler = audio.NewResampler(resamplerInput, inputRate, whisperSampleRate)
 	o.resampler.Start(o.ctx)
 
-	// Music buffer sized for ~60s of 16 kHz audio. Speech goes directly
-	// to the transcriber's rolling window via FeedChunk.
+	// Buffers for speech and music audio. Sized for ~60s of 16kHz mono.
+	o.speechBuffer = audio.NewBuffer(whisperSampleRate * 60)
 	o.musicBuffer = audio.NewBuffer(whisperSampleRate * 60)
 
 	o.streaming = true
@@ -478,6 +479,7 @@ func (o *Orchestrator) processingLoop() {
 		if result.Raw == classifier.ClassSilence {
 			silenceSamples += len(chunk)
 			if silenceSamples > whisperSampleRate*5 {
+				o.flushSpeechBuffer()
 				o.endRecorderSegment()
 				o.transcriber.Reset()
 				o.flushMusicBuffer()
@@ -498,6 +500,7 @@ func (o *Orchestrator) processingLoop() {
 	for _, pc := range pending {
 		o.processChunkAs(pc.rawClass, pc.samples)
 	}
+	o.flushSpeechBuffer()
 	o.endRecorderSegment()
 	o.transcriber.Reset()
 	o.flushMusicBuffer()
@@ -511,13 +514,12 @@ func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
 
 	if from == classifier.ClassMusic && to == classifier.ClassSpeech {
 		o.transcriber.Reset()
-		// Don't clear the music marker -- it stays until a new one replaces it.
-		// Don't flush music buffer -- let it accumulate for fingerprinting.
 	}
 
 	if from == classifier.ClassSpeech && to == classifier.ClassMusic {
+		// Flush speech buffer before transitioning (segment mode transcribes here).
+		o.flushSpeechBuffer()
 		o.transcriber.Reset()
-		// Only add a new music marker if we don't already have one showing.
 		if !o.musicMarkerUp {
 			o.ui.AppendMusic()
 			o.musicMarkerUp = true
@@ -525,6 +527,8 @@ func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
 	}
 
 	if from == classifier.ClassSpeech && to == classifier.ClassSilence {
+		// Flush speech buffer -- the speaker stopped talking.
+		o.flushSpeechBuffer()
 		o.transcriber.Reset()
 	}
 
@@ -544,15 +548,7 @@ func (o *Orchestrator) processChunkAs(class classifier.Classification, chunk []f
 			log.Printf("app: start speech segment: %v", err)
 		}
 
-		// WHY no Write call here: The tee goroutine feeds pre-resampled
-		// stereo int16 samples to the recorder via WriteInt16. This loop
-		// only manages segment start/end transitions based on classification.
-
-		// WHY two paths: The whisper classifier already ran inference
-		// to classify the audio, so it has the transcription text.
-		// Re-transcribing through the rolling window would waste CPU.
-		// Non-whisper classifiers use DSP features, so they still need
-		// the rolling window for transcription.
+		// Whisper classifier already has the text from classification.
 		if wc, ok := o.classifier.(*classifier.WhisperClassifier); ok {
 			if text := wc.ConsumeText(); text != "" {
 				now := time.Now()
@@ -567,7 +563,8 @@ func (o *Orchestrator) processChunkAs(class classifier.Classification, chunk []f
 				}
 				o.ui.AppendTranscription(now, text, entry.ID)
 			}
-		} else {
+		} else if o.config.TranscriptionMode == "rolling" {
+			// Rolling mode: feed to rolling window, get progressive output.
 			text, triggered, err := o.transcriber.FeedChunk(chunk)
 			if err != nil {
 				log.Printf("app: transcribe: %v", err)
@@ -584,6 +581,12 @@ func (o *Orchestrator) processChunkAs(class classifier.Classification, chunk []f
 				}
 				o.ui.AppendTranscription(now, text, entry.ID)
 			}
+		} else {
+			// Segment mode (default): accumulate speech audio, transcribe
+			// once when the segment ends (transition to music/silence).
+			// WHY: produces cleaner text than rolling window -- no duplicates,
+			// no carryover from overlapping windows, no diffText artifacts.
+			o.speechBuffer.Write(chunk)
 		}
 
 	case classifier.ClassMusic:
@@ -608,6 +611,44 @@ func (o *Orchestrator) processChunkAs(class classifier.Classification, chunk []f
 	case classifier.ClassSilence:
 		// Don't feed silence to transcriber or music buffer.
 	}
+}
+
+// flushSpeechBuffer transcribes accumulated speech audio in one shot (segment mode).
+// Produces cleaner text than rolling window -- no overlapping duplicates.
+func (o *Orchestrator) flushSpeechBuffer() {
+	if o.speechBuffer == nil || o.speechBuffer.Len() == 0 {
+		return
+	}
+
+	samples := o.speechBuffer.ReadAll()
+	if len(samples) == 0 {
+		return
+	}
+
+	log.Printf("app: transcribing speech segment: %d samples (%.1fs)",
+		len(samples), float64(len(samples))/float64(whisperSampleRate))
+
+	text, err := o.transcriber.Transcribe(samples)
+	if err != nil {
+		log.Printf("app: transcribe segment: %v", err)
+		return
+	}
+	if text == "" {
+		return
+	}
+
+	now := time.Now()
+	entry := &storage.LogEntry{
+		Timestamp:  now,
+		EntryType:  "speech",
+		Content:    text,
+		DurationMs: int64(len(samples)) * 1000 / int64(whisperSampleRate),
+		AudioPath:  o.recorder.CurrentPath(),
+	}
+	if dbErr := o.db.InsertEntry(entry); dbErr != nil {
+		log.Printf("app: insert speech entry: %v", dbErr)
+	}
+	o.ui.AppendTranscription(now, text, entry.ID)
 }
 
 // flushMusicBuffer identifies whatever is in the music buffer.

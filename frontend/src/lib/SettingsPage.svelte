@@ -4,6 +4,7 @@
   let streamUrl = $state('');
   let modelSize = $state('base');
   let classifierTier = $state('basic');
+  let transcriptionMode = $state('segment');
   let useGpu = $state(false);
   let acoustIdKey = $state('');
   let language = $state('en');
@@ -21,6 +22,7 @@
       streamUrl = cfg.StreamURL || '';
       modelSize = cfg.ModelSize || 'base';
       classifierTier = cfg.ClassifierTier || 'basic';
+      transcriptionMode = cfg.TranscriptionMode || 'segment';
       useGpu = cfg.UseGPU || false;
       acoustIdKey = cfg.AcoustIDKey || '';
       language = cfg.Language || 'en';
@@ -46,6 +48,7 @@
         Language: language,
         BufferSecs: 0,
         ClassifierTier: classifierTier,
+        TranscriptionMode: transcriptionMode,
         ClassifierDebug: classifierDebug,
         WindowSizeSecs: windowSize,
         WindowStepSecs: windowStep,
@@ -88,6 +91,13 @@
         <option value="scheirer">scheirer</option>
         <option value="mfcc">mfcc</option>
         <option value="whisper">whisper</option>
+      </select>
+    </div>
+    <div>
+      <label for="transcription-mode">Transcription Mode</label>
+      <select id="transcription-mode" bind:value={transcriptionMode}>
+        <option value="segment">segment (transcribe on transition, cleaner text)</option>
+        <option value="rolling">rolling (progressive output, lower latency)</option>
       </select>
     </div>
   </div>
