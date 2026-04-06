@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -248,6 +249,11 @@ func (o *Orchestrator) startStreaming() {
 	// forwards it to the resampler's input channel.
 	resamplerInput := make(chan []int16, 32)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("PANIC in audio tee: %v\n%s", r, debug.Stack())
+			}
+		}()
 		defer close(resamplerInput)
 		for samples := range o.decoder.Output() {
 			// Feed to listener (no-op if disabled or nil).
@@ -279,6 +285,13 @@ func (o *Orchestrator) startStreaming() {
 
 // processingLoop reads resampled audio chunks and routes them based on classification.
 func (o *Orchestrator) processingLoop() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in processingLoop: %v\n%s", r, debug.Stack())
+			o.ui.UpdateStatus(false, "crashed")
+		}
+	}()
+
 	var lastClass classifier.Classification
 	var silenceSamples int
 
@@ -357,6 +370,11 @@ func (o *Orchestrator) flushMusicBuffer() {
 
 // identifyMusic drains the music buffer, fingerprints it, and logs the result.
 func (o *Orchestrator) identifyMusic() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in identifyMusic: %v\n%s", r, debug.Stack())
+		}
+	}()
 	samples := o.musicBuffer.ReadAll()
 	if len(samples) == 0 {
 		return
