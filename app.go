@@ -82,20 +82,17 @@ func (a *App) startup(ctx context.Context) {
 // shutdown is called when the Wails app is closing.
 func (a *App) shutdown(ctx context.Context) {
 	// Unblock the orchestrator's Start() -> UI.Run() -> <-done channel.
-	// This causes Start() to proceed to its shutdown() cleanup.
+	// This causes Start() to proceed to its shutdown() cleanup path,
+	// which stops streaming, closes the transcriber, and closes the DB.
 	if a.wailsUI != nil {
 		a.wailsUI.Close()
 	}
 
-	// Give the orchestrator a moment to clean up. Its shutdown() closes
-	// the database, transcriber, listener, fingerprinter, etc.
-	// The WailsUI.Run() unblock causes Start() to call shutdown() internally.
-	time.Sleep(500 * time.Millisecond)
-
-	// Close our own DB handle if the orchestrator didn't get to it.
-	if a.db != nil {
-		a.db.Close()
-	}
+	// Give the orchestrator time to clean up. It handles DB close internally.
+	// WHY not close DB here: the orchestrator's identifyMusic goroutine may
+	// still be running and writing to the DB. Closing it here causes
+	// "sql: database is closed" errors. Let the orchestrator sequence it.
+	time.Sleep(1 * time.Second)
 }
 
 // --- Config bindings ---
