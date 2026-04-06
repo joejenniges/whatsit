@@ -99,7 +99,20 @@ func (c *WhisperClassifier) Classify(samples []float32) ClassifyResult {
 		return ClassifyResult{Raw: c.lastClass, Debounced: c.lastClass}
 	}
 
-	// Real words with decent confidence -> speech.
+	// Check for singing: whisper transcribes lyrics but often with music
+	// markers mixed in, or the text has song-like patterns (short repeated
+	// phrases, rhyming). If the original (pre-cleaned) text contained music
+	// markers alongside real words, it's likely singing over music.
+	if containsMusicMarkers(text) {
+		if c.Debug {
+			log.Printf("whisper-classifier: music markers mixed with text, classifying as music (lyrics)")
+		}
+		c.lastClass = ClassMusic
+		c.lastText = ""
+		return ClassifyResult{Raw: c.lastClass, Debounced: c.lastClass}
+	}
+
+	// Real words with decent confidence and no music markers -> speech.
 	c.lastClass = ClassSpeech
 	c.lastText = text
 	return ClassifyResult{Raw: c.lastClass, Debounced: c.lastClass}
@@ -168,6 +181,35 @@ func isWhisperMusicOutput(text string) bool {
 	// Repeated phrase pattern: "thank you thank you thank you" (repeating bigrams).
 	if isRepeatedPhrase(words) {
 		return true
+	}
+
+	return false
+}
+
+// containsMusicMarkers returns true if the text contains music note symbols
+// or bracketed music markers mixed with other words. This catches the case
+// where whisper transcribes singing lyrics alongside music indicators, e.g.
+// "♪ don't stop believing ♪" or "[Music] hey there delilah".
+func containsMusicMarkers(text string) bool {
+	lower := strings.ToLower(text)
+
+	// Check for music note unicode characters anywhere in the text.
+	for _, r := range lower {
+		if r == '♪' || r == '♫' || r == '♩' || r == '♬' {
+			return true
+		}
+	}
+	// Check for emoji music notes.
+	if strings.Contains(lower, "🎵") || strings.Contains(lower, "🎶") {
+		return true
+	}
+
+	// Check for bracketed music markers within (not as the entire string).
+	musicBrackets := []string{"[music]", "(music)", "[music playing]", "(music playing)"}
+	for _, m := range musicBrackets {
+		if strings.Contains(lower, m) {
+			return true
+		}
 	}
 
 	return false

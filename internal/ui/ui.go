@@ -23,12 +23,19 @@ type App struct {
 	onStop   func()
 	onSave   func(*config.Config)
 	onListen func(enabled bool)
-	onSearch func(query string, limit int) ([]storage.LogEntry, error)
+
+	// History loading callback -- returns recent entries from the database.
+	onLoadHistory func(limit int) ([]storage.LogEntry, error)
+
+	// Song edit callback -- persists edits to song entries in the database.
+	onEditSong func(id int64, title, artist string) error
+
+	// Insert song callback -- creates a new song entry in the database.
+	onInsertSong func() (*storage.LogEntry, error)
 
 	// Screens -- only one is shown at a time.
 	downloadScreen *DownloadScreen
 	liveView       *LiveView
-	historyPage    *HistoryPage
 	configPage     *ConfigPage
 }
 
@@ -60,9 +67,19 @@ func (a *App) SetListenCallback(cb func(enabled bool)) {
 	a.onListen = cb
 }
 
-// SetSearchCallback sets the callback for history search queries.
-func (a *App) SetSearchCallback(cb func(query string, limit int) ([]storage.LogEntry, error)) {
-	a.onSearch = cb
+// SetLoadHistoryCallback sets the callback for loading recent entries on launch.
+func (a *App) SetLoadHistoryCallback(cb func(limit int) ([]storage.LogEntry, error)) {
+	a.onLoadHistory = cb
+}
+
+// SetEditSongCallback sets the callback for persisting song edits.
+func (a *App) SetEditSongCallback(cb func(id int64, title, artist string) error) {
+	a.onEditSong = cb
+}
+
+// SetInsertSongCallback sets the callback for inserting a new song entry.
+func (a *App) SetInsertSongCallback(cb func() (*storage.LogEntry, error)) {
+	a.onInsertSong = cb
 }
 
 // Run shows the window and blocks on the Fyne event loop. Must be called
@@ -83,17 +100,21 @@ func (a *App) ShowDownloadScreen(modelsDir, modelSize string) {
 func (a *App) ShowMainScreen() {
 	fyne.Do(func() {
 		a.liveView = NewLiveView(a.onStart, a.onStop, a.onListen)
-		a.historyPage = NewHistoryPage(a.onSearch)
+		a.liveView.SetLoadHistoryCallback(a.onLoadHistory)
+		a.liveView.SetEditSongCallback(a.onEditSong)
+		a.liveView.SetInsertSongCallback(a.onInsertSong)
 		a.configPage = NewConfigPage(a.config, a.onSave)
 
 		tabs := container.NewAppTabs(
 			container.NewTabItem("Live", a.liveView.Container()),
-			container.NewTabItem("History", a.historyPage.Container()),
 			container.NewTabItem("Settings", a.configPage.Container()),
 		)
 		tabs.SetTabLocation(container.TabLocationTop)
 
 		a.window.SetContent(tabs)
+
+		// Load history after the view is created and shown.
+		go a.liveView.LoadHistory()
 	})
 }
 
@@ -107,17 +128,25 @@ func (a *App) UpdateDownloadProgress(downloaded, total int64) {
 
 // AppendTranscription adds a timestamped transcription line to the live view.
 // Safe to call from any goroutine.
-func (a *App) AppendTranscription(timestamp time.Time, text string) {
+func (a *App) AppendTranscription(timestamp time.Time, text string, dbID int64) {
 	if a.liveView != nil {
-		a.liveView.AppendTranscription(timestamp, text)
+		a.liveView.AppendTranscription(timestamp, text, dbID)
 	}
 }
 
 // AppendSong adds a song divider to the live view.
 // Safe to call from any goroutine.
-func (a *App) AppendSong(title, artist string) {
+func (a *App) AppendSong(title, artist string, dbID int64) {
 	if a.liveView != nil {
-		a.liveView.AppendSong(title, artist)
+		a.liveView.AppendSong(title, artist, dbID)
+	}
+}
+
+// UpdateSongLine updates the current song line without adding a new entry.
+// Safe to call from any goroutine.
+func (a *App) UpdateSongLine(title, artist string) {
+	if a.liveView != nil {
+		a.liveView.UpdateSongLine(title, artist)
 	}
 }
 

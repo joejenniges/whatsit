@@ -148,6 +148,29 @@ func (d *Database) SearchEntries(query string, limit int) ([]LogEntry, error) {
 	return scanEntries(rows)
 }
 
+// UpdateEntryContent updates the content column of an existing log entry by ID.
+func (d *Database) UpdateEntryContent(id int64, content string) error {
+	_, err := d.db.Exec(`UPDATE log_entries SET content = ? WHERE id = ?`, content, id)
+	if err != nil {
+		return fmt.Errorf("update entry content: %w", err)
+	}
+	return nil
+}
+
+// UpdateEntrySong updates the title, artist, and content of a song entry by ID.
+func (d *Database) UpdateEntrySong(id int64, title, artist string) error {
+	content := title
+	if artist != "" {
+		content = title + " - " + artist
+	}
+	_, err := d.db.Exec(`UPDATE log_entries SET content = ?, title = ?, artist = ? WHERE id = ?`,
+		content, title, artist, id)
+	if err != nil {
+		return fmt.Errorf("update song entry: %w", err)
+	}
+	return nil
+}
+
 // nullString returns a sql.NullString that is valid only if s is non-empty.
 func nullString(s string) sql.NullString {
 	if s == "" {

@@ -25,12 +25,15 @@ const whisperSampleRate = 16000
 type UI interface {
 	SetCallbacks(onStart, onStop func(), onSave func(*config.Config))
 	SetListenCallback(func(enabled bool))
-	SetSearchCallback(func(query string, limit int) ([]storage.LogEntry, error))
+	SetLoadHistoryCallback(func(limit int) ([]storage.LogEntry, error))
+	SetEditSongCallback(func(id int64, title, artist string) error)
+	SetInsertSongCallback(func() (*storage.LogEntry, error))
 	ShowDownloadScreen(modelsDir, modelSize string)
 	ShowMainScreen()
 	UpdateDownloadProgress(downloaded, total int64)
-	AppendTranscription(timestamp time.Time, text string)
-	AppendSong(title, artist string)
+	AppendTranscription(timestamp time.Time, text string, dbID int64)
+	AppendSong(title, artist string, dbID int64)
+	UpdateSongLine(title, artist string)
 	AppendMusic()
 	ClearMusicMarker()
 	UpdateStatus(connected bool, classification string)
@@ -243,8 +246,24 @@ func (o *Orchestrator) finishInit(modelPath string) {
 		}
 	})
 
-	o.ui.SetSearchCallback(func(query string, limit int) ([]storage.LogEntry, error) {
-		return o.db.SearchEntries(query, limit)
+	o.ui.SetLoadHistoryCallback(func(limit int) ([]storage.LogEntry, error) {
+		return o.db.GetRecentEntries(limit)
+	})
+
+	o.ui.SetEditSongCallback(func(id int64, title, artist string) error {
+		return o.db.UpdateEntrySong(id, title, artist)
+	})
+
+	o.ui.SetInsertSongCallback(func() (*storage.LogEntry, error) {
+		entry := &storage.LogEntry{
+			Timestamp: time.Now(),
+			EntryType: "song",
+			Content:   "Song played",
+		}
+		if err := o.db.InsertEntry(entry); err != nil {
+			return nil, err
+		}
+		return entry, nil
 	})
 
 	o.ui.ShowMainScreen()
@@ -543,7 +562,7 @@ func (o *Orchestrator) processChunkAs(class classifier.Classification, chunk []f
 				if dbErr := o.db.InsertEntry(entry); dbErr != nil {
 					log.Printf("app: insert speech entry: %v", dbErr)
 				}
-				o.ui.AppendTranscription(now, text)
+				o.ui.AppendTranscription(now, text, entry.ID)
 			}
 		} else {
 			text, triggered, err := o.transcriber.FeedChunk(chunk)
@@ -560,7 +579,7 @@ func (o *Orchestrator) processChunkAs(class classifier.Classification, chunk []f
 				if dbErr := o.db.InsertEntry(entry); dbErr != nil {
 					log.Printf("app: insert speech entry: %v", dbErr)
 				}
-				o.ui.AppendTranscription(now, text)
+				o.ui.AppendTranscription(now, text, entry.ID)
 			}
 		}
 
@@ -634,12 +653,16 @@ func (o *Orchestrator) identifyMusic() {
 		log.Printf("app: fingerprinting %d raw samples at %dHz stereo (%ds)", len(rawSamples), o.rawMusicRate, len(rawSamples)/o.rawMusicRate/2)
 		fp, dur, fpErr := o.fingerprinter.FingerprintInt16(rawSamples, o.rawMusicRate, 2)
 		if fpErr != nil {
-			log.Printf("app: fingerprint: %v", fpErr)
+			log.Printf("app: fingerprint error: %v", fpErr)
 		} else {
+			log.Printf("app: fingerprint OK, duration=%ds, fp_len=%d, sending to AcoustID", dur, len(fp))
 			song, lookupErr := o.acoustidClient.Identify(fp, dur)
 			if lookupErr != nil {
-				log.Printf("app: acoustid lookup: %v", lookupErr)
-			} else if song != nil {
+				log.Printf("app: acoustid lookup error: %v", lookupErr)
+			} else if song == nil {
+				log.Printf("app: acoustid: no match found")
+			}
+			if song != nil {
 				log.Printf("app: identified song: %q by %s (score %.2f)", song.Title, song.Artist, song.Score)
 				entry := &storage.LogEntry{
 					Timestamp:  time.Now(),
@@ -656,7 +679,7 @@ func (o *Orchestrator) identifyMusic() {
 					log.Printf("app: insert song entry: %v", err)
 				}
 				// Replace the "Music playing" placeholder with the actual song.
-				o.ui.AppendSong(song.Title, song.Artist)
+				o.ui.AppendSong(song.Title, song.Artist, entry.ID)
 				return
 			}
 		}
