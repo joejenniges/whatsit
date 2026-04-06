@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 
@@ -129,6 +131,9 @@ func NewConfigPage(cfg *config.Config, onSave func(*config.Config)) *ConfigPage 
 	// Open Data Folder button
 	cp.openFolderBtn = widget.NewButton("Open Data Folder", cp.handleOpenFolder)
 
+	// Open Logs Folder button
+	openLogsBtn := widget.NewButton("Open Logs Folder", cp.handleOpenLogsFolder)
+
 	// Build the form layout using a grid with label-widget pairs.
 	form := container.New(
 		layout.NewFormLayout(),
@@ -142,7 +147,7 @@ func NewConfigPage(cfg *config.Config, onSave func(*config.Config)) *ConfigPage 
 		widget.NewLabel("Window Step (s)"), cp.windowStepEntry,
 	)
 
-	buttons := container.NewHBox(cp.saveBtn, cp.openFolderBtn)
+	buttons := container.NewHBox(cp.saveBtn, cp.openFolderBtn, openLogsBtn)
 
 	cp.root = container.NewVBox(
 		container.NewPadded(form),
@@ -197,6 +202,33 @@ func (cp *ConfigPage) handleSave() {
 	}
 
 	cp.statusLbl.SetText("Settings saved.")
+}
+
+// handleOpenLogsFolder opens the logs directory in the OS file manager.
+func (cp *ConfigPage) handleOpenLogsFolder() {
+	dir, err := config.AppDir()
+	if err != nil {
+		cp.statusLbl.SetText("Could not determine data folder.")
+		return
+	}
+
+	logsDir := filepath.Join(dir, "logs")
+	// Create the logs directory if it doesn't exist yet.
+	_ = os.MkdirAll(logsDir, 0o755)
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("explorer", logsDir)
+	case "darwin":
+		cmd = exec.Command("open", logsDir)
+	default:
+		cmd = exec.Command("xdg-open", logsDir)
+	}
+
+	if err := cmd.Start(); err != nil {
+		cp.statusLbl.SetText("Failed to open logs folder: " + err.Error())
+	}
 }
 
 // handleOpenFolder opens the RadioTranscriber data directory in the OS file

@@ -2,6 +2,7 @@ package audio
 
 import (
 	"encoding/binary"
+	"io"
 	"log"
 	"sync"
 
@@ -66,6 +67,10 @@ func (l *Listener) SetEnabled(enabled bool) {
 		l.player = l.otoCtx.NewPlayer(l.feeder)
 		l.player.Play()
 	} else if l.player != nil {
+		// Signal the feeder to unblock its Read() before closing the player.
+		// WHY: oto's player goroutine may be blocked in feeder.Read(). If we
+		// close without unblocking, it deadlocks or panics.
+		l.feeder.Stop()
 		l.player.Pause()
 		if err := l.player.Close(); err != nil {
 			log.Printf("listener: close player: %v", err)
@@ -107,6 +112,9 @@ func (l *Listener) Close() {
 	defer l.mu.Unlock()
 
 	if l.player != nil {
+		if l.feeder != nil {
+			l.feeder.Stop()
+		}
 		l.player.Pause()
 		if err := l.player.Close(); err != nil {
 			log.Printf("listener: close player: %v", err)
@@ -135,8 +143,19 @@ func newInt16Reader() *int16Feeder {
 func (f *int16Feeder) Feed(data []byte) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.done {
+		return
+	}
 	f.buf = append(f.buf, data...)
 	f.cond.Signal()
+}
+
+// Stop signals the feeder to unblock any Read() calls and stop accepting data.
+func (f *int16Feeder) Stop() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.done = true
+	f.cond.Broadcast()
 }
 
 // Read implements io.Reader for oto's player.
@@ -146,6 +165,10 @@ func (f *int16Feeder) Read(p []byte) (int, error) {
 
 	for len(f.buf) == 0 && !f.done {
 		f.cond.Wait()
+	}
+
+	if len(f.buf) == 0 && f.done {
+		return 0, io.EOF
 	}
 
 	n := copy(p, f.buf)
