@@ -108,14 +108,16 @@ func (o *Orchestrator) Start() {
 
 	modelsDir := filepath.Join(appDir, "models")
 
+	log.Printf("app: ASR engine: %s", o.config.ASREngine)
+
 	if o.config.ASREngine == "parakeet" {
-		// Parakeet ONNX model.
+		log.Printf("app: initializing parakeet engine...")
 		exists, modelPath, vocabPath, err := transcriber.EnsureParakeetModel(modelsDir)
 		if err != nil {
-			log.Fatalf("app: check parakeet model: %v", err)
-		}
-
-		if !exists {
+			log.Printf("app: parakeet model check failed: %v -- falling back to whisper", err)
+			o.config.ASREngine = "whisper"
+		} else if !exists {
+			log.Printf("app: parakeet model not found, starting download...")
 			o.ui.ShowDownloadScreen(modelsDir, "parakeet-ctc-0.6b")
 			o.ui.SetCallbacks(nil, nil, nil)
 
@@ -127,7 +129,9 @@ func (o *Orchestrator) Start() {
 					},
 				)
 				if dlErr != nil {
-					log.Fatalf("app: download parakeet model: %v", dlErr)
+					log.Printf("app: parakeet download failed: %v -- falling back to whisper", dlErr)
+					// Can't easily fall back mid-download. User needs to restart.
+					return
 				}
 				o.finishInitParakeet(dlModel, dlVocab)
 			}()
@@ -135,13 +139,16 @@ func (o *Orchestrator) Start() {
 			o.ui.Run()
 			o.shutdown()
 			return
+		} else {
+			o.finishInitParakeet(modelPath, vocabPath)
+			o.ui.Run()
+			o.shutdown()
+			return
 		}
+	}
 
-		o.finishInitParakeet(modelPath, vocabPath)
-		o.ui.Run()
-		o.shutdown()
-	} else {
-		// Whisper model (default).
+	// Whisper model (default, or fallback from parakeet failure).
+	{
 		modelSize := o.config.ModelSize
 		if modelSize == "" {
 			modelSize = "base"
