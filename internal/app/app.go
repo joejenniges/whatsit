@@ -66,6 +66,7 @@ type Orchestrator struct {
 	rawMusicBuffer []int16 // original stereo int16 for Chromaprint fingerprinting
 	rawMusicRate   int     // sample rate of raw audio
 	rawMusicMu     sync.Mutex
+	musicSamples   int  // total music samples accumulated (not reset on bounce)
 	recorder       *audio.SegmentRecorder
 
 	ctx    context.Context
@@ -487,7 +488,11 @@ func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
 	o.endRecorderSegment()
 
 	if from == classifier.ClassMusic && to == classifier.ClassSpeech {
-		o.flushMusicBuffer()
+		// WHY no flushMusicBuffer here: On bouncy stations, music->speech
+		// transitions happen frequently. Flushing the music buffer each time
+		// means we never accumulate enough audio for fingerprinting. The
+		// identifyMusic call is triggered by musicSamples counter instead.
+		// The raw audio buffer keeps accumulating in the tee goroutine.
 		o.transcriber.Reset()
 		o.ui.ClearMusicMarker()
 	}
@@ -566,8 +571,15 @@ func (o *Orchestrator) processChunkAs(class classifier.Classification, chunk []f
 		}
 
 		o.musicBuffer.Write(chunk)
+		o.musicSamples += len(chunk)
 
-		if o.musicBuffer.Duration(whisperSampleRate) >= 15*time.Second {
+		// WHY musicSamples instead of musicBuffer.Duration(): When the
+		// classifier bounces (music->speech->music), handleTransition
+		// flushes the music buffer each time. With musicSamples we track
+		// total music audio seen across bounces, so fingerprinting still
+		// triggers even if the buffer keeps getting drained.
+		if o.musicSamples >= whisperSampleRate*15 {
+			o.musicSamples = 0
 			go o.identifyMusic()
 		}
 
@@ -608,8 +620,18 @@ func (o *Orchestrator) identifyMusic() {
 
 	durationMs := int64(len(samples)) * 1000 / int64(whisperSampleRate)
 
+	log.Printf("app: identifyMusic: %d resampled samples, %d raw stereo samples", len(samples), len(rawSamples))
+
 	// Try fingerprinting + AcoustID lookup if available.
+	if o.fingerprinter == nil {
+		log.Printf("app: identifyMusic: fingerprinter not available, skipping")
+	} else if o.acoustidClient == nil {
+		log.Printf("app: identifyMusic: no AcoustID API key configured, skipping")
+	} else if len(rawSamples) == 0 {
+		log.Printf("app: identifyMusic: no raw audio available for fingerprinting")
+	}
 	if o.fingerprinter != nil && o.acoustidClient != nil && len(rawSamples) > 0 {
+		log.Printf("app: fingerprinting %d raw samples at %dHz stereo (%ds)", len(rawSamples), o.rawMusicRate, len(rawSamples)/o.rawMusicRate/2)
 		fp, dur, fpErr := o.fingerprinter.FingerprintInt16(rawSamples, o.rawMusicRate, 2)
 		if fpErr != nil {
 			log.Printf("app: fingerprint: %v", fpErr)
