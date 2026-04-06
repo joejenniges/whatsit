@@ -72,6 +72,7 @@ type Orchestrator struct {
 	rawMusicMu     sync.Mutex
 	musicSamples  int  // total music samples accumulated (not reset on bounce)
 	musicMarkerUp bool // true if a "Song played" marker is currently showing
+	musicDBLogged bool // true if we've already written a music_unknown DB entry for this segment
 	recorder      *audio.SegmentRecorder
 
 	ctx    context.Context
@@ -653,6 +654,8 @@ func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
 
 	if from == classifier.ClassMusic && to == classifier.ClassSpeech {
 		o.transcriber.Reset()
+		o.musicMarkerUp = false
+		o.musicDBLogged = false
 	}
 
 	if from == classifier.ClassSpeech && to == classifier.ClassMusic {
@@ -673,6 +676,8 @@ func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
 
 	if from == classifier.ClassMusic && to == classifier.ClassSilence {
 		o.flushMusicBuffer()
+		o.musicMarkerUp = false
+		o.musicDBLogged = false
 	}
 }
 
@@ -863,23 +868,29 @@ func (o *Orchestrator) identifyMusic() {
 				}
 				// Replace the "Music playing" placeholder with the actual song.
 				o.ui.AppendSong(song.Title, song.Artist, entry.ID)
-				// Reset so the next song gets a fresh marker.
+				// Reset so the next song gets a fresh marker and DB entry.
 				o.musicMarkerUp = false
+				o.musicDBLogged = false
 				return
 			}
 		}
 	}
 
-	// No song identified -- just log it. The UI already shows "Music playing"
-	// from the transition, so don't add another marker.
-	entry := &storage.LogEntry{
-		Timestamp:  time.Now(),
-		EntryType:  "music_unknown",
-		DurationMs: durationMs,
-		AudioPath:  o.recorder.CurrentPath(),
-	}
-	if err := o.db.InsertEntry(entry); err != nil {
-		log.Printf("app: insert music entry: %v", err)
+	// No song identified -- log ONE music_unknown entry per music segment.
+	// WHY: identifyMusic fires every 15s of music. Without this guard,
+	// the DB accumulates a "music_unknown" entry every 15 seconds, which
+	// all show up as separate "Song played" lines on the next launch.
+	if !o.musicDBLogged {
+		o.musicDBLogged = true
+		entry := &storage.LogEntry{
+			Timestamp:  time.Now(),
+			EntryType:  "music_unknown",
+			DurationMs: durationMs,
+			AudioPath:  o.recorder.CurrentPath(),
+		}
+		if err := o.db.InsertEntry(entry); err != nil {
+			log.Printf("app: insert music entry: %v", err)
+		}
 	}
 }
 
