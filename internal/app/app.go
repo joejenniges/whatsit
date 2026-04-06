@@ -53,7 +53,7 @@ type Orchestrator struct {
 	decoder     *audio.Decoder
 	resampler   *audio.Resampler
 	classifier  classifier.AudioClassifier
-	transcriber *transcriber.Transcriber
+	transcriber transcriber.ASREngine
 
 	// WHY optional: musicid requires libchromaprint and an AcoustID API key.
 	// If either is unavailable, we still run -- just skip song identification.
