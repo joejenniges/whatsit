@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"io"
 	"log"
+	"runtime"
 	"sync"
 
 	"github.com/ebitengine/oto/v3"
@@ -12,71 +13,134 @@ import (
 // Listener plays decoded stereo int16 PCM audio through the system speakers
 // using oto. It can be toggled on/off at any time. When off, Write calls are
 // no-ops. When on, samples are written to the oto player for playback.
+//
+// WHY dedicated goroutine: oto uses WASAPI on Windows which requires COM
+// initialization on the thread that creates the context. Wails/WebView2 also
+// uses COM on the main thread. Running oto on its own OS-locked goroutine
+// avoids conflicts.
 type Listener struct {
 	mu      sync.Mutex
 	enabled bool
+	feeder  *int16Feeder
 
-	otoCtx *oto.Context
-	player *oto.Player
-	feeder *int16Feeder
-
-	sampleRate int
-	channels   int
+	// Commands sent to the oto goroutine.
+	cmdCh chan listenCmd
+	done  chan struct{}
 }
 
-// NewListener creates a Listener for the given sample rate and channel count.
-// The oto context is initialized eagerly so that toggling on is fast.
+type listenCmdType int
+
+const (
+	cmdEnable listenCmdType = iota
+	cmdDisable
+	cmdClose
+)
+
+type listenCmd struct {
+	typ listenCmdType
+}
+
+// NewListener creates a Listener. The oto context and player are managed on
+// a dedicated OS-locked goroutine to avoid COM threading conflicts with WebView2.
 func NewListener(sampleRate, channels int) (*Listener, error) {
-	op := &oto.NewContextOptions{
-		SampleRate:   sampleRate,
-		ChannelCount: channels,
-		Format:       oto.FormatSignedInt16LE,
+	l := &Listener{
+		cmdCh: make(chan listenCmd, 8),
+		done:  make(chan struct{}),
 	}
 
-	otoCtx, readyChan, err := oto.NewContext(op)
-	if err != nil {
+	errCh := make(chan error, 1)
+
+	go func() {
+		// Lock this goroutine to a single OS thread for COM/WASAPI.
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+
+		op := &oto.NewContextOptions{
+			SampleRate:   sampleRate,
+			ChannelCount: channels,
+			Format:       oto.FormatSignedInt16LE,
+		}
+
+		otoCtx, readyChan, err := oto.NewContext(op)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		<-readyChan
+		log.Printf("listener: oto context created on dedicated thread, sampleRate=%d channels=%d", sampleRate, channels)
+		errCh <- nil
+
+		var player *oto.Player
+
+		defer func() {
+			if player != nil {
+				player.Close()
+			}
+			close(l.done)
+		}()
+
+		for cmd := range l.cmdCh {
+			switch cmd.typ {
+			case cmdEnable:
+				if player != nil {
+					player.Close()
+					player = nil
+				}
+				l.mu.Lock()
+				feeder := l.feeder
+				l.mu.Unlock()
+				if feeder == nil {
+					continue
+				}
+				player = otoCtx.NewPlayer(feeder)
+				player.Play()
+				log.Printf("listener: player created and playing")
+
+			case cmdDisable:
+				if player != nil {
+					player.Pause()
+					player.Close()
+					player = nil
+					log.Printf("listener: player stopped")
+				}
+
+			case cmdClose:
+				return
+			}
+		}
+	}()
+
+	// Wait for oto initialization.
+	if err := <-errCh; err != nil {
 		return nil, err
 	}
-	// Wait for oto to be ready.
-	<-readyChan
 
-	return &Listener{
-		otoCtx:     otoCtx,
-		sampleRate: sampleRate,
-		channels:   channels,
-	}, nil
+	return l, nil
 }
 
-// SetEnabled toggles audio playback. When switching from enabled to disabled,
-// the current player is paused and reset. When switching to enabled, a new
-// feeder and player are created.
+// SetEnabled toggles audio playback.
 func (l *Listener) SetEnabled(enabled bool) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	if l.enabled == enabled {
+		l.mu.Unlock()
 		return
 	}
 	l.enabled = enabled
 
 	if enabled {
-		// Create a fresh feeder and player each time listening is enabled.
-		// WHY: Reusing a paused player can have stale buffered audio from
-		// the last listen session, causing a burst of old audio on re-enable.
 		l.feeder = newInt16Reader()
-		l.player = l.otoCtx.NewPlayer(l.feeder)
-		l.player.Play()
-	} else if l.player != nil {
-		// Signal the feeder to unblock its Read() before closing the player.
-		// WHY: oto's player goroutine may be blocked in feeder.Read(). If we
-		// close without unblocking, it deadlocks or panics.
-		l.feeder.Stop()
-		l.player.Pause()
-		if err := l.player.Close(); err != nil {
-			log.Printf("listener: close player: %v", err)
-		}
-		l.player = nil
+		l.mu.Unlock()
+		log.Printf("listener: SetEnabled(true)")
+		l.cmdCh <- listenCmd{typ: cmdEnable}
+	} else {
+		feeder := l.feeder
 		l.feeder = nil
+		l.mu.Unlock()
+		log.Printf("listener: SetEnabled(false)")
+		if feeder != nil {
+			feeder.Stop()
+		}
+		l.cmdCh <- listenCmd{typ: cmdDisable}
 	}
 }
 
@@ -88,12 +152,14 @@ func (l *Listener) Enabled() bool {
 }
 
 // Write sends stereo int16 samples to the audio output. If listening is
-// disabled, this is a no-op. The samples slice is not modified.
+// disabled, this is a no-op.
 func (l *Listener) Write(samples []int16) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
+	feeder := l.feeder
+	enabled := l.enabled
+	l.mu.Unlock()
 
-	if !l.enabled || l.feeder == nil {
+	if !enabled || feeder == nil {
 		return
 	}
 
@@ -103,25 +169,21 @@ func (l *Listener) Write(samples []int16) {
 		binary.LittleEndian.PutUint16(buf[i*2:], uint16(s))
 	}
 
-	l.feeder.Feed(buf)
+	feeder.Feed(buf)
 }
 
-// Close releases oto resources.
+// Close releases oto resources and shuts down the oto goroutine.
 func (l *Listener) Close() {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.player != nil {
-		if l.feeder != nil {
-			l.feeder.Stop()
-		}
-		l.player.Pause()
-		if err := l.player.Close(); err != nil {
-			log.Printf("listener: close player: %v", err)
-		}
-		l.player = nil
+	if l.feeder != nil {
+		l.feeder.Stop()
 		l.feeder = nil
 	}
+	l.enabled = false
+	l.mu.Unlock()
+
+	l.cmdCh <- listenCmd{typ: cmdClose}
+	<-l.done // wait for oto goroutine to exit
 }
 
 // int16Feeder is an io.Reader that is fed byte slices by the audio pipeline.
