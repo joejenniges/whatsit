@@ -324,13 +324,15 @@ func (o *Orchestrator) startStreaming() {
 	o.recorder = audio.NewSegmentRecorder(audioDir, inputRate, 2, o.config.SaveAudio)
 	o.rawMusicRate = inputRate
 
-	// Initialize the audio listener for speaker output. Non-fatal if it fails
-	// (e.g., no audio output device). Starts disabled -- user toggles it on.
-	listener, listenErr := audio.NewListener(inputRate, 2)
-	if listenErr != nil {
-		log.Printf("app: listener unavailable, listen feature disabled: %v", listenErr)
-	} else {
-		o.listener = listener
+	// Initialize the audio listener once. Reuse across start/stop cycles
+	// because oto only allows one context per process lifetime.
+	if o.listener == nil {
+		listener, listenErr := audio.NewListener(inputRate, 2)
+		if listenErr != nil {
+			log.Printf("app: listener unavailable, listen feature disabled: %v", listenErr)
+		} else {
+			o.listener = listener
+		}
 	}
 
 	// WHY tee channel: The decoder outputs stereo int16. We need to feed those
@@ -724,10 +726,12 @@ func (o *Orchestrator) stopStreaming() {
 	// The pipeline channels will close in order (streamer -> decoder -> resampler),
 	// which causes processingLoop to exit and flush buffers.
 
+	// WHY not Close() the listener here: oto only allows ONE context per
+	// process lifetime. If we Close() and then startStreaming() tries to
+	// create a new listener, oto panics with "context is already created".
+	// Instead, just disable it. The listener stays alive for reuse.
 	if o.listener != nil {
 		o.listener.SetEnabled(false)
-		o.listener.Close()
-		o.listener = nil
 	}
 
 	o.streaming = false
@@ -741,8 +745,13 @@ func (o *Orchestrator) shutdown() {
 	if o.transcriber != nil {
 		o.transcriber.Close()
 	}
+	// WHY listener.Close() only in shutdown, not stopStreaming:
+	// oto allows only one context per process. We keep the listener alive
+	// across start/stop cycles and only close it when the app exits.
 	if o.listener != nil {
+		o.listener.SetEnabled(false)
 		o.listener.Close()
+		o.listener = nil
 	}
 	if o.fingerprinter != nil {
 		o.fingerprinter.Close()
