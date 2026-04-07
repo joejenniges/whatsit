@@ -30,7 +30,11 @@ func NewEnhancedClassifier(inner AudioClassifier, sampleRate int, debug bool) *E
 		inner:           inner,
 		rhythm:          NewRhythmAccumulator(sampleRate),
 		debug:           debug,
-		musicRhythmMin:  0.30,
+		// WHY 0.40 not 0.30: Robotic/processed speech (station IDs, jingles)
+		// with evenly-timed words produces rhythm strengths of 0.30-0.36.
+		// Real rock/pop music hits 0.60-0.95. The 0.40 threshold avoids
+		// false positives on rhythmic speech while still catching all music.
+		musicRhythmMin:  0.40,
 		speechRhythmMax: 0.15,
 		lastClass:       ClassSilence,
 		debounceN:       2,
