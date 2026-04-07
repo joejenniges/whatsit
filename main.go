@@ -15,7 +15,6 @@ import (
 var assets embed.FS
 
 func main() {
-	// Set up logging first.
 	logResult, err := logging.Setup()
 	if err != nil {
 		panic("logging setup failed: " + err.Error())
@@ -23,11 +22,12 @@ func main() {
 	defer logResult.File.Close()
 
 	app := NewApp()
+	ws := LoadWindowState()
 
 	err = wails.Run(&options.App{
 		Title:  "RadioTranscriber",
-		Width:  900,
-		Height: 600,
+		Width:  ws.Width,
+		Height: ws.Height,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

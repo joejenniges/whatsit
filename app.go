@@ -13,6 +13,7 @@ import (
 	"github.com/joe/radio-transcriber/internal/config"
 	"github.com/joe/radio-transcriber/internal/storage"
 	"github.com/joe/radio-transcriber/internal/transcriber"
+	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // ModelStatus is returned by GetModelStatus to tell the frontend whether
@@ -106,17 +107,16 @@ func (a *App) startup(ctx context.Context) {
 
 // shutdown is called when the Wails app is closing.
 func (a *App) shutdown(ctx context.Context) {
+	// Save window position/size for next launch.
+	x, y := wailsRuntime.WindowGetPosition(ctx)
+	w, h := wailsRuntime.WindowGetSize(ctx)
+	SaveWindowState(WindowState{X: x, Y: y, Width: w, Height: h})
+
 	// Unblock the orchestrator's Start() -> UI.Run() -> <-done channel.
-	// This causes Start() to proceed to its shutdown() cleanup path,
-	// which stops streaming, closes the transcriber, and closes the DB.
 	if a.wailsUI != nil {
 		a.wailsUI.Close()
 	}
 
-	// Give the orchestrator time to clean up. It handles DB close internally.
-	// WHY not close DB here: the orchestrator's identifyMusic goroutine may
-	// still be running and writing to the DB. Closing it here causes
-	// "sql: database is closed" errors. Let the orchestrator sequence it.
 	time.Sleep(1 * time.Second)
 }
 
@@ -139,6 +139,11 @@ func (a *App) GetConfig() *config.Config {
 // SaveConfig persists a new configuration to disk and updates the in-memory
 // config. The orchestrator's onSave callback is invoked if set.
 func (a *App) SaveConfig(cfg config.Config) error {
+	// Apply runtime-changeable settings immediately.
+	if a.orchestrator != nil && cfg.SaveAudio != a.config.SaveAudio {
+		a.orchestrator.SetSaveAudio(cfg.SaveAudio)
+	}
+
 	if a.wailsUI != nil && a.wailsUI.onSave != nil {
 		a.wailsUI.onSave(&cfg)
 	} else {

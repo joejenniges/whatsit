@@ -776,6 +776,16 @@ func (o *Orchestrator) endRecorderSegment() {
 	}
 }
 
+// SetSaveAudio toggles audio recording on/off at runtime.
+func (o *Orchestrator) SetSaveAudio(enabled bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.recorder != nil {
+		o.recorder.SetEnabled(enabled)
+	}
+	o.config.SaveAudio = enabled
+}
+
 // stopStreaming tears down the audio pipeline.
 func (o *Orchestrator) stopStreaming() {
 	o.mu.Lock()
