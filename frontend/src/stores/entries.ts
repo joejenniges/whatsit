@@ -1,6 +1,5 @@
 /**
  * Reactive store for transcript entries.
- * Uses Svelte 5 module-level $state runes.
  */
 
 export interface Entry {
@@ -10,16 +9,13 @@ export interface Entry {
   content: string;
   title: string;
   artist: string;
-  fresh?: boolean;  // true for entries added in real-time (not loaded from DB)
+  fresh?: boolean;
 }
 
-// WHY: Module-level state with getter/setter functions rather than a class.
-// Svelte 5 runes ($state) work at the module level in .svelte.ts files,
-// but in plain .ts files we need to export mutable references that components
-// can import. We use a simple array and mutation functions.
 let _entries: Entry[] = [];
 let _selected: Set<number> = new Set();
 let _listeners: Array<() => void> = [];
+let _eventsSetup = false;
 
 function notify() {
   for (const fn of _listeners) fn();
@@ -116,6 +112,62 @@ export function insertAfter(afterId: number, entry: Entry) {
     _entries = next;
   }
   notify();
+}
+
+/**
+ * Set up Wails event listeners for real-time entry updates.
+ * Called once from LiveView's onMount. Idempotent -- subsequent calls are no-ops.
+ * WHY here instead of in the component: event listeners are global (Wails-level).
+ * If they were in the component, destroying and remounting LiveView (tab switch)
+ * would register duplicate listeners or lose them entirely.
+ */
+export async function setupEntryEvents() {
+  if (_eventsSetup) return;
+  _eventsSetup = true;
+
+  try {
+    const { EventsOn } = await import('../../wailsjs/runtime/runtime');
+
+    EventsOn('transcription', (data: any) => {
+      console.log('EVENT transcription:', data);
+      appendEntry({
+        id: data.id,
+        type: 'speech',
+        timestamp: new Date(data.timestamp),
+        content: data.text,
+        title: '',
+        artist: '',
+        fresh: true,
+      });
+    });
+
+    EventsOn('song-identified', (data: any) => {
+      console.log('EVENT song-identified:', data);
+      updateEntry(data.id, {
+        type: 'song',
+        title: data.title,
+        artist: data.artist,
+        content: `"${data.title}" - ${data.artist}`,
+      });
+    });
+
+    EventsOn('music-detected', (data: any) => {
+      console.log('EVENT music-detected:', data);
+      appendEntry({
+        id: data.id || Date.now(),
+        type: 'music_unknown',
+        timestamp: new Date(),
+        content: 'Song played',
+        title: '',
+        artist: '',
+        fresh: true,
+      });
+    });
+
+    console.log('Entry events registered');
+  } catch (e) {
+    console.error('Failed to set up entry events:', e);
+  }
 }
 
 /**

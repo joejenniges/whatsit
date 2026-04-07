@@ -8,7 +8,7 @@
   import StatusBar from './StatusBar.svelte';
   import {
     getEntries, appendEntry, updateEntry, removeEntry, removeEntries,
-    insertAfter, setEntries, fromLogEntry,
+    insertAfter, setEntries, fromLogEntry, setupEntryEvents,
     isSelected, getSelectedEntries, toggleSelect, clearSelection,
     subscribe as entriesSub,
     type Entry,
@@ -20,7 +20,7 @@
   } from '../stores/search';
   import {
     getConnected, getClassification, getStreaming, getListenEnabled,
-    setStatus, setStreaming, setListenEnabled,
+    setStatus, setStreaming, setListenEnabled, setupStatusEvents,
     subscribe as statusSub,
   } from '../stores/status';
 
@@ -109,7 +109,11 @@
     ];
 
     loadHistory();
-    setupEvents();
+    // Set up Wails event listeners at the store level (idempotent).
+    // WHY store-level: these are global Wails events. If registered in the
+    // component, tab switching (destroy/remount) would lose or duplicate them.
+    setupEntryEvents();
+    setupStatusEvents();
 
     return () => {
       for (const u of unsubs) u();
@@ -130,49 +134,6 @@
     }
   }
 
-  async function setupEvents() {
-    try {
-      const { EventsOn } = await import('../../wailsjs/runtime/runtime');
-
-      EventsOn('transcription', (data: any) => {
-        appendEntry({
-          id: data.id,
-          type: 'speech',
-          timestamp: new Date(data.timestamp),
-          content: data.text,
-          title: '',
-          artist: '',
-          fresh: true,
-        });
-      });
-
-      EventsOn('song-identified', (data: any) => {
-        updateEntry(data.id, {
-          type: 'song',
-          title: data.title,
-          artist: data.artist,
-          content: `"${data.title}" - ${data.artist}`,
-        });
-      });
-
-      EventsOn('music-detected', (data: any) => {
-        appendEntry({
-          id: data.id,
-          type: 'music_unknown',
-          timestamp: new Date(),
-          content: 'Song played',
-          title: '',
-          artist: '',
-        });
-      });
-
-      EventsOn('status', (data: any) => {
-        setStatus(data.connected, data.classification);
-      });
-    } catch {
-      // Runtime not available in dev
-    }
-  }
 
   async function handleSongSave(id: number, title: string, artist: string) {
     updateEntry(id, { title, artist, type: 'song' });

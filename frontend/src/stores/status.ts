@@ -7,6 +7,7 @@ let _classification = '--';
 let _streaming = false;
 let _listenEnabled = false;
 let _listeners: Array<() => void> = [];
+let _eventsSetup = false;
 
 function notify() {
   for (const fn of _listeners) fn();
@@ -41,4 +42,22 @@ export function setStreaming(s: boolean) {
 export function setListenEnabled(enabled: boolean) {
   _listenEnabled = enabled;
   notify();
+}
+
+/**
+ * Set up Wails event listener for status updates. Idempotent.
+ */
+export async function setupStatusEvents() {
+  if (_eventsSetup) return;
+  _eventsSetup = true;
+
+  try {
+    const { EventsOn } = await import('../../wailsjs/runtime/runtime');
+    EventsOn('status', (data: any) => {
+      setStatus(data.connected, data.classification);
+    });
+    console.log('Status events registered');
+  } catch (e) {
+    console.error('Failed to set up status events:', e);
+  }
 }
