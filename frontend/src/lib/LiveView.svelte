@@ -24,7 +24,11 @@
     subscribe as statusSub,
   } from '../stores/status';
 
-  // Reactive state driven by stores
+  // Reactive state driven by stores.
+  // WHY tick counter: Svelte 5's $state reactivity doesn't always detect
+  // reassignment from manual store callbacks. The tick forces a re-render
+  // by changing a value the template depends on (via $derived).
+  let tick = $state(0);
   let entries: Entry[] = $state([]);
   let query = $state('');
   let filterActive = $state(false);
@@ -48,7 +52,7 @@
   );
 
   function syncFromStores() {
-    entries = getEntries();
+    entries = [...getEntries()];  // new array reference to ensure Svelte detects the change
     query = getQuery();
     filterActive = getFilterActive();
     regex = getRegex();
@@ -57,6 +61,7 @@
     streaming = getStreaming();
     listenEnabled = getListenEnabled();
     selectedCount = getSelectedEntries().length;
+    tick++;
   }
 
   function scrollToBottom() {
