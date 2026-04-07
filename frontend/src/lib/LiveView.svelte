@@ -24,6 +24,8 @@
   let regex: RegExp | null = $state(null);
   let connected = $state(false);
   let classification = $state('--');
+  let classifierTier = $state('');
+  let whisperLoad = $state(0);
   let streaming = $state(false);
   let listenEnabled = $state(false);
   let selectedCount = $state(0);
@@ -48,6 +50,8 @@
     const status = getStatus();
     connected = status.connected;
     classification = status.classification;
+    classifierTier = status.classifierTier;
+    whisperLoad = status.whisperLoad;
     streaming = getStreaming();
     listenEnabled = getListenEnabled();
     selectedCount = getSelectedEntries().length;
@@ -332,6 +336,8 @@
   <StatusBar
     {connected}
     {classification}
+    {classifierTier}
+    {whisperLoad}
     {streaming}
     {listenEnabled}
     onstart={handleStart}

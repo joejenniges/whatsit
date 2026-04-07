@@ -1,13 +1,20 @@
 <script lang="ts">
-  let { connected, classification, streaming, listenEnabled, onstart, onstop, onlistentoggle }: {
+  let { connected, classification, classifierTier, whisperLoad, streaming, listenEnabled, onstart, onstop, onlistentoggle }: {
     connected: boolean;
     classification: string;
+    classifierTier: string;
+    whisperLoad: number;
     streaming: boolean;
     listenEnabled: boolean;
     onstart: () => void;
     onstop: () => void;
     onlistentoggle: (enabled: boolean) => void;
   } = $props();
+
+  let loadPercent = $derived(Math.round(whisperLoad * 100));
+  let loadClass = $derived(
+    whisperLoad > 1.0 ? 'overloaded' : whisperLoad > 0.7 ? 'high' : 'normal'
+  );
 </script>
 
 <div class="status-bar">
@@ -16,6 +23,14 @@
       {connected ? 'Connected' : 'Disconnected'}
     </span>
     <span class="classification">Classification: {classification}</span>
+    {#if classifierTier}
+      <span class="tier">Classifier: {classifierTier}</span>
+    {/if}
+    {#if whisperLoad > 0}
+      <span class="load {loadClass}">
+        Whisper: {loadPercent}%
+      </span>
+    {/if}
   </div>
   <div class="controls">
     <button class="ctrl-btn start" onclick={onstart} disabled={streaming}>Start</button>
@@ -65,6 +80,27 @@
   }
   .classification {
     color: #888;
+  }
+  .tier {
+    color: #666;
+    font-style: italic;
+  }
+  .load {
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 500;
+  }
+  .load.normal {
+    color: #00c864;
+  }
+  .load.high {
+    color: #ffaa00;
+    background: rgba(255, 170, 0, 0.1);
+  }
+  .load.overloaded {
+    color: #ff5050;
+    background: rgba(255, 80, 80, 0.15);
+    font-weight: 700;
   }
   .controls {
     display: flex;

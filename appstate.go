@@ -18,6 +18,11 @@ type AppState struct {
 	// Connection
 	Connected      bool   `json:"connected"`
 	Classification string `json:"classification"`
+	ClassifierTier string `json:"classifierTier"`
+
+	// Whisper load: ratio of processing time to audio duration.
+	// 0.5 = 50% capacity (healthy). 1.0 = 100% (at limit). >1.0 = overloaded.
+	WhisperLoad float64 `json:"whisperLoad"`
 
 	// Entries (last 200 for display)
 	Entries []UIEntry `json:"entries"`
@@ -64,6 +69,20 @@ func (s *AppState) SetConnected(connected bool) {
 func (s *AppState) SetClassification(class string) {
 	s.mu.Lock()
 	s.Classification = class
+	s.mu.Unlock()
+	s.emitStatus()
+}
+
+func (s *AppState) SetClassifierTier(tier string) {
+	s.mu.Lock()
+	s.ClassifierTier = tier
+	s.mu.Unlock()
+	// No event -- this is set once at startup and included in status events.
+}
+
+func (s *AppState) SetWhisperLoad(load float64) {
+	s.mu.Lock()
+	s.WhisperLoad = load
 	s.mu.Unlock()
 	s.emitStatus()
 }
@@ -156,8 +175,10 @@ func (s *AppState) SetGPUWarning(msg string) {
 func (s *AppState) emitStatus() {
 	s.mu.RLock()
 	data := map[string]interface{}{
-		"connected":      s.Connected,
-		"classification": s.Classification,
+		"connected":       s.Connected,
+		"classification":  s.Classification,
+		"classifierTier":  s.ClassifierTier,
+		"whisperLoad":     s.WhisperLoad,
 	}
 	s.mu.RUnlock()
 	s.emit("status:update", data)

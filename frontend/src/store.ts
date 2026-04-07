@@ -10,6 +10,8 @@ import { globToRegex } from './utils/glob';
 export interface Status {
   connected: boolean;
   classification: string;
+  classifierTier: string;
+  whisperLoad: number;  // 0-1+ ratio of processing time to audio duration
 }
 
 export interface Download {
@@ -29,7 +31,7 @@ export interface Entry {
 }
 
 // State
-let _status: Status = { connected: false, classification: '--' };
+let _status: Status = { connected: false, classification: '--', classifierTier: '', whisperLoad: 0 };
 let _entries: Entry[] = [];
 let _download: Download = { active: false, percent: 0, message: '' };
 let _gpuWarning = '';
@@ -167,6 +169,8 @@ export async function init() {
       _status = {
         connected: state.Connected || false,
         classification: state.Classification || '--',
+        classifierTier: state.ClassifierTier || '',
+        whisperLoad: state.WhisperLoad || 0,
       };
       _streaming = state.Connected || false;
       _entries = (state.Entries || []).map(toEntry);
@@ -197,6 +201,8 @@ export async function init() {
       _status = {
         connected: data.connected,
         classification: data.classification || '--',
+        classifierTier: data.classifierTier || _status.classifierTier,
+        whisperLoad: data.whisperLoad ?? _status.whisperLoad,
       };
       _streaming = data.connected;
       notify();

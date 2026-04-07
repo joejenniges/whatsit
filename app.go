@@ -97,6 +97,13 @@ func (a *App) startup(ctx context.Context) {
 	a.wailsUI = NewWailsUI(a.state)
 	a.wailsUI.SetContext(ctx)
 
+	// Set the classifier tier on the state so the frontend can display it.
+	tier := a.config.ClassifierTier
+	if tier == "" {
+		tier = "whisper+rhythm"
+	}
+	a.state.SetClassifierTier(tier)
+
 	// Create orchestrator with the WailsUI adapter.
 	a.orchestrator = app.NewOrchestrator(a.config, a.wailsUI)
 

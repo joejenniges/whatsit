@@ -37,6 +37,7 @@ type UI interface {
 	ClearMusicMarker()
 	UpdateStatus(connected bool, classification string)
 	UpdateLatency(latency time.Duration)
+	UpdateWhisperLoad(load float64)
 	ShowGPUWarning(message string)
 	Run()
 }
@@ -59,10 +60,11 @@ type Orchestrator struct {
 	// pipeline -- pre-resampling so the user hears full-quality stereo audio.
 	listener *audio.Listener
 
-	speechBuffer  *audio.Buffer // segment mode: accumulate speech, transcribe on transition
-	musicMarkerUp bool          // true if a "Song played" marker is currently showing
-	musicDBLogged bool          // true if we've already written a music_unknown DB entry for this segment
-	listenWanted  bool // true if user checked Listen before streaming started
+	speechBuffer    *audio.Buffer // segment mode: accumulate speech, transcribe on transition
+	musicMarkerUp   bool          // true if a "Song played" marker is currently showing
+	musicDBLogged   bool          // true if we've already written a music_unknown DB entry for this segment
+	lastMusicMarker time.Time     // when the last "Song played" was emitted
+	listenWanted    bool          // true if user checked Listen before streaming started
 	recorder      *audio.SegmentRecorder
 
 	ctx    context.Context
@@ -624,8 +626,11 @@ func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
 		// Flush speech buffer before transitioning (segment mode transcribes here).
 		o.flushSpeechBuffer()
 		o.transcriber.Reset()
-		if !o.musicMarkerUp {
-			// Write one DB entry and one UI marker per music segment.
+		// WHY 150-second minimum: prevents rapid "Song played" entries when the
+		// classifier bounces or when short music segments are close together.
+		// For trivia, one marker every 2.5 minutes is plenty.
+		minSeparation := 150 * time.Second
+		if !o.musicMarkerUp && time.Since(o.lastMusicMarker) >= minSeparation {
 			entry := &storage.LogEntry{
 				Timestamp: time.Now(),
 				EntryType: "music_unknown",
@@ -636,6 +641,7 @@ func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
 			o.ui.AppendMusic()
 			o.musicMarkerUp = true
 			o.musicDBLogged = true
+			o.lastMusicMarker = time.Now()
 		}
 	}
 
@@ -733,10 +739,23 @@ func (o *Orchestrator) flushSpeechBuffer() {
 		return
 	}
 
-	log.Printf("app: transcribing speech segment: %d samples (%.1fs)",
-		len(samples), float64(len(samples))/float64(whisperSampleRate))
+	audioDuration := float64(len(samples)) / float64(whisperSampleRate)
+	log.Printf("app: transcribing speech segment: %d samples (%.1fs)", len(samples), audioDuration)
 
+	startTime := time.Now()
 	text, err := o.transcriber.Transcribe(samples)
+	processingTime := time.Since(startTime).Seconds()
+
+	// Whisper load: processing time / audio duration.
+	// <1.0 = healthy (processing faster than real-time).
+	// >1.0 = overloaded (falling behind).
+	if audioDuration > 0 {
+		load := processingTime / audioDuration
+		log.Printf("app: transcription took %.1fs for %.1fs audio (%.0f%% capacity)",
+			processingTime, audioDuration, load*100)
+		o.ui.UpdateWhisperLoad(load)
+	}
+
 	if err != nil {
 		log.Printf("app: transcribe segment: %v", err)
 		return

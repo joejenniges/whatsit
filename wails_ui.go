@@ -164,8 +164,11 @@ func (w *WailsUI) UpdateStatus(connected bool, classification string) {
 }
 
 func (w *WailsUI) UpdateLatency(latency time.Duration) {
-	// Latency is informational only, not currently displayed in the new UI.
-	// Could add to AppState if needed later.
+	// Not used -- whisper load is more useful than raw latency.
+}
+
+func (w *WailsUI) UpdateWhisperLoad(load float64) {
+	w.state.SetWhisperLoad(load)
 }
 
 func (w *WailsUI) ShowGPUWarning(message string) {
