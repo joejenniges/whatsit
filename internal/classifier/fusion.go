@@ -133,68 +133,49 @@ func (f *FusionClassifier) classifyInternal(samples []float32) FusionResult {
 	var genreScore float64
 
 	switch {
-	case cedResult.IsSpeech && !cedResult.IsSinging && noBeat:
-		// Speech detected with no beat. Even if CED also flags "Music"
-		// (common with background music in ads/studios), no beat means
-		// it's speech content. Trust the lack of rhythm.
-		// WHY removed !cedResult.IsMusic: CED frequently flags both Speech
-		// and Music simultaneously for radio announcer voice over ambient
-		// music bed. The beat is the tiebreaker, not the Music label.
-		raw = ClassSpeech
+	// WHY rhythm-primary for speech+music: On radio stations, CED flags
+	// both speech=true AND music=true for almost EVERYTHING (the station's
+	// audio processing, studio ambience, etc. read as "musical" to CED).
+	// The Music label alone is unreliable. Rhythm is the tiebreaker.
+	//
+	// Decision priority:
+	// 1. Singing + strong beat = music (lyrics)
+	// 2. Speech flagged + no strong beat = speech (even if Music is also flagged)
+	// 3. Music only (no speech) + beat = music
+	// 4. Music only (no speech) + no beat = music (ambient/classical)
+	// 5. Ambiguous = default to speech (bias toward transcription)
 
-	case cedResult.IsSpeech && cedResult.IsMusic && !cedResult.IsSinging && !hasBeat:
-		// Speech + Music both flagged, no beat, no singing.
-		// This is DJ talking over background music. Transcribe it.
-		raw = ClassSpeech
-
-	case cedResult.IsSinging && hasBeat:
-		// Singing + beat detected. Usually music with lyrics.
-		// BUT: CED's "Singing" label has false positives on energetic speech.
-		// If the TOP label is a speech label, trust that over the singing flag.
-		// WHY: at 15:37:38, an announcer saying "Just let it go!" triggered
-		// singing=true top=Music(0.63) rhythm=0.429 -- but it was speech.
-		if cedResult.IsSpeech && isSpeechLabel(cedResult.TopLabel) {
-			raw = ClassSpeech
-		} else {
-			raw = ClassMusic
-			genre = cedResult.Genre
-			genreScore = cedResult.GenreScore
-		}
-
-	case cedResult.IsSinging && noBeat:
-		// Acapella -- transcribe it.
-		// WHY speech: Singing without a beat is likely acapella or someone
-		// humming/singing along without music. Worth transcribing.
-		raw = ClassSpeech
-
-	case cedResult.IsMusic && hasBeat:
-		// Clear music with beat.
+	case cedResult.IsSinging && hasBeat && !(cedResult.IsSpeech && isSpeechLabel(cedResult.TopLabel)):
+		// Singing + beat, and the top label isn't a speech label.
+		// This is the rock/pop lyrics case.
 		raw = ClassMusic
 		genre = cedResult.Genre
 		genreScore = cedResult.GenreScore
 
-	case cedResult.IsMusic && !hasBeat:
-		// Music without clear beat (ambient, classical, slow).
-		// WHY still music: CED confidently says music. Trust it even
-		// without rhythm confirmation -- ambient/classical often lack beats.
+	case cedResult.IsSpeech && !hasBeat:
+		// Speech detected and no strong beat. Classify as speech regardless
+		// of whether CED also flags Music (it almost always does on radio).
+		raw = ClassSpeech
+
+	case cedResult.IsSpeech && hasBeat && !cedResult.IsSinging:
+		// Speech + beat but no singing. Could be DJ over music bed.
+		// Bias toward speech -- better to transcribe than miss it.
+		raw = ClassSpeech
+
+	case !cedResult.IsSpeech && cedResult.IsMusic && hasBeat:
+		// Music without any speech flag + beat. Clear music.
 		raw = ClassMusic
 		genre = cedResult.Genre
 		genreScore = cedResult.GenreScore
 
-	case cedResult.IsSpeech && hasBeat:
-		// CED thinks speech but there's a beat.
-		// Could be DJ over music bed or lyrics.
-		if cedResult.IsMusic || cedResult.IsSinging {
-			raw = ClassMusic
-			genre = cedResult.Genre
-			genreScore = cedResult.GenreScore
-		} else {
-			// Speech over music bed -- DJ talking, transcribe it.
-			raw = ClassSpeech
-		}
+	case !cedResult.IsSpeech && cedResult.IsMusic && !hasBeat:
+		// Music without speech, no beat. Ambient/classical/slow.
+		raw = ClassMusic
+		genre = cedResult.Genre
+		genreScore = cedResult.GenreScore
 
-	case !cedResult.IsSpeech && !cedResult.IsMusic && !cedResult.IsSinging && hasBeat:
-		// Low CED scores but rhythm detected -- instrumental.
+	case !cedResult.IsSpeech && !cedResult.IsMusic && hasBeat:
+		// Nothing flagged but rhythm detected -- instrumental.
 		raw = ClassMusic
 
 	case !cedResult.IsSpeech && !cedResult.IsMusic && !cedResult.IsSinging && noBeat:
