@@ -159,9 +159,19 @@ func (f *FusionClassifier) classifyInternal(samples []float32) FusionResult {
 		raw = ClassSpeech
 
 	case cedResult.IsSpeech && hasBeat && !cedResult.IsSinging:
-		// Speech + beat but no singing. Could be DJ over music bed.
-		// Bias toward speech -- better to transcribe than miss it.
-		raw = ClassSpeech
+		// Speech + beat but no singing. Could be DJ over music bed OR
+		// heavy metal/harsh vocals that CED doesn't flag as "Singing".
+		// WHY check top label: if CED's TOP label is Music or a genre,
+		// the audio is primarily musical even though speech is also flagged.
+		// Heavy metal vocals at rhythm 0.30-0.50 were leaking through
+		// because singing=false (harsh vocals != typical singing to CED).
+		if isMusicLabel(cedResult.TopLabel) || isGenreLabel(cedResult.TopLabel) {
+			raw = ClassMusic
+			genre = cedResult.Genre
+			genreScore = cedResult.GenreScore
+		} else {
+			raw = ClassSpeech
+		}
 
 	case !cedResult.IsSpeech && cedResult.IsMusic && hasBeat:
 		// Music without any speech flag + beat. Clear music.
