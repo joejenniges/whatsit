@@ -108,9 +108,21 @@ func (a *App) startup(ctx context.Context) {
 // shutdown is called when the Wails app is closing.
 func (a *App) shutdown(ctx context.Context) {
 	// Save window position/size for next launch.
-	x, y := wailsRuntime.WindowGetPosition(ctx)
-	w, h := wailsRuntime.WindowGetSize(ctx)
-	SaveWindowState(WindowState{X: x, Y: y, Width: w, Height: h})
+	// WHY recover: WindowGetPosition/Size may panic during shutdown
+	// if the window is already being destroyed.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("save window state: recovered from panic: %v", r)
+			}
+		}()
+		x, y := wailsRuntime.WindowGetPosition(a.ctx)
+		w, h := wailsRuntime.WindowGetSize(a.ctx)
+		if w > 0 && h > 0 {
+			SaveWindowState(WindowState{X: x, Y: y, Width: w, Height: h})
+			log.Printf("app: saved window state: %dx%d at (%d,%d)", w, h, x, y)
+		}
+	}()
 
 	// Unblock the orchestrator's Start() -> UI.Run() -> <-done channel.
 	if a.wailsUI != nil {
