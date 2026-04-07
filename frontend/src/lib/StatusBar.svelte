@@ -1,9 +1,10 @@
 <script lang="ts">
-  let { connected, classification, classifierTier, whisperLoad, streaming, listenEnabled, onstart, onstop, onlistentoggle }: {
+  let { connected, classification, classifierTier, whisperLoad, cedLoadMs, streaming, listenEnabled, onstart, onstop, onlistentoggle }: {
     connected: boolean;
     classification: string;
     classifierTier: string;
     whisperLoad: number;
+    cedLoadMs: number;
     streaming: boolean;
     listenEnabled: boolean;
     onstart: () => void;
@@ -25,6 +26,9 @@
     <span class="classification">Classification: {classification}</span>
     {#if classifierTier}
       <span class="tier">Classifier: {classifierTier}</span>
+    {/if}
+    {#if cedLoadMs > 0}
+      <span class="load normal">CED: {cedLoadMs.toFixed(0)}ms</span>
     {/if}
     {#if whisperLoad > 0}
       <span class="load {loadClass}">

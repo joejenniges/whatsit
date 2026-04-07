@@ -12,6 +12,7 @@ export interface Status {
   classification: string;
   classifierTier: string;
   whisperLoad: number;  // 0-1+ ratio of processing time to audio duration
+  cedLoadMs: number;    // CED inference time in milliseconds
 }
 
 export interface Download {
@@ -31,7 +32,7 @@ export interface Entry {
 }
 
 // State
-let _status: Status = { connected: false, classification: '--', classifierTier: '', whisperLoad: 0 };
+let _status: Status = { connected: false, classification: '--', classifierTier: '', whisperLoad: 0, cedLoadMs: 0 };
 let _entries: Entry[] = [];
 let _download: Download = { active: false, percent: 0, message: '' };
 let _gpuWarning = '';
@@ -171,6 +172,7 @@ export async function init() {
         classification: state.Classification || '--',
         classifierTier: state.ClassifierTier || '',
         whisperLoad: state.WhisperLoad || 0,
+        cedLoadMs: state.CEDLoadMs || 0,
       };
       _streaming = state.Connected || false;
       _entries = (state.Entries || []).map(toEntry);
@@ -203,6 +205,7 @@ export async function init() {
         classification: data.classification || '--',
         classifierTier: data.classifierTier || _status.classifierTier,
         whisperLoad: data.whisperLoad ?? _status.whisperLoad,
+        cedLoadMs: data.cedLoadMs ?? _status.cedLoadMs,
       };
       _streaming = data.connected;
       notify();

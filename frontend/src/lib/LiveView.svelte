@@ -26,6 +26,7 @@
   let classification = $state('--');
   let classifierTier = $state('');
   let whisperLoad = $state(0);
+  let cedLoadMs = $state(0);
   let streaming = $state(false);
   let listenEnabled = $state(false);
   let selectedCount = $state(0);
@@ -52,6 +53,7 @@
     classification = status.classification;
     classifierTier = status.classifierTier;
     whisperLoad = status.whisperLoad;
+    cedLoadMs = status.cedLoadMs;
     streaming = getStreaming();
     listenEnabled = getListenEnabled();
     selectedCount = getSelectedEntries().length;
@@ -338,6 +340,7 @@
     {classification}
     {classifierTier}
     {whisperLoad}
+    {cedLoadMs}
     {streaming}
     {listenEnabled}
     onstart={handleStart}

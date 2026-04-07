@@ -39,6 +39,7 @@ type UI interface {
 	UpdateStatus(connected bool, classification string)
 	UpdateLatency(latency time.Duration)
 	UpdateWhisperLoad(load float64)
+	UpdateCEDLoad(ms float64)
 	ShowGPUWarning(message string)
 	Run()
 }
@@ -627,10 +628,13 @@ func (o *Orchestrator) processingLoop() {
 			silenceSamples = 0
 		}
 
-		// Show raw classification in the UI for responsiveness --
-		// the user sees what the audio actually sounds like, not the
-		// debounced state which lags behind.
+		// Show raw classification in the UI for responsiveness.
 		o.ui.UpdateStatus(true, string(result.Raw))
+
+		// Report CED inference time if using fusion classifier.
+		if fc, ok := o.classifier.(*classifier.FusionClassifier); ok {
+			o.ui.UpdateCEDLoad(fc.LastInferenceMs)
+		}
 	}
 
 	// Channel closed -- streamer/decoder/resampler pipeline ended.

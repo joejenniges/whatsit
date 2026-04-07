@@ -2,6 +2,7 @@ package classifier
 
 import (
 	"log"
+	"time"
 )
 
 // FusionClassifier combines CED-tiny AI classification with the rhythm
@@ -25,6 +26,9 @@ type FusionClassifier struct {
 	cedMusicMin     float64 // default: 0.3 -- CED music score to consider
 	rhythmMusicMin  float64 // default: 0.25 -- rhythm strength for "has beat"
 	rhythmSpeechMax float64 // default: 0.15 -- rhythm strength for "no beat"
+
+	// Performance tracking
+	LastInferenceMs float64 // last CED inference time in milliseconds
 
 	// Debounce state
 	lastClass       Classification
@@ -99,7 +103,9 @@ func (f *FusionClassifier) classifyInternal(samples []float32) FusionResult {
 	}
 
 	// 2. Run CED-tiny.
+	cedStart := time.Now()
 	cedResult, err := f.ced.Classify(samples)
+	f.LastInferenceMs = float64(time.Since(cedStart).Microseconds()) / 1000.0
 	if err != nil {
 		// WHY fallback: CED failure shouldn't crash the pipeline. Fall back
 		// to rhythm-only classification, which is better than nothing.
@@ -127,8 +133,18 @@ func (f *FusionClassifier) classifyInternal(samples []float32) FusionResult {
 	var genreScore float64
 
 	switch {
-	case cedResult.IsSpeech && !cedResult.IsMusic && !cedResult.IsSinging && noBeat:
-		// Clear speech, no musical content.
+	case cedResult.IsSpeech && !cedResult.IsSinging && noBeat:
+		// Speech detected with no beat. Even if CED also flags "Music"
+		// (common with background music in ads/studios), no beat means
+		// it's speech content. Trust the lack of rhythm.
+		// WHY removed !cedResult.IsMusic: CED frequently flags both Speech
+		// and Music simultaneously for radio announcer voice over ambient
+		// music bed. The beat is the tiebreaker, not the Music label.
+		raw = ClassSpeech
+
+	case cedResult.IsSpeech && cedResult.IsMusic && !cedResult.IsSinging && !hasBeat:
+		// Speech + Music both flagged, no beat, no singing.
+		// This is DJ talking over background music. Transcribe it.
 		raw = ClassSpeech
 
 	case cedResult.IsSinging && hasBeat:

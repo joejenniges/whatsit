@@ -164,6 +164,10 @@ func (w *WailsUI) UpdateWhisperLoad(load float64) {
 	w.state.SetWhisperLoad(load)
 }
 
+func (w *WailsUI) UpdateCEDLoad(ms float64) {
+	w.state.SetCEDLoad(ms)
+}
+
 func (w *WailsUI) ShowGPUWarning(message string) {
 	w.state.SetGPUWarning(message)
 }

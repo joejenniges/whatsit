@@ -24,6 +24,9 @@ type AppState struct {
 	// 0.5 = 50% capacity (healthy). 1.0 = 100% (at limit). >1.0 = overloaded.
 	WhisperLoad float64 `json:"whisperLoad"`
 
+	// CED inference time in milliseconds per chunk.
+	CEDLoadMs float64 `json:"cedLoadMs"`
+
 	// Entries (last 200 for display)
 	Entries []UIEntry `json:"entries"`
 
@@ -83,6 +86,13 @@ func (s *AppState) SetClassifierTier(tier string) {
 func (s *AppState) SetWhisperLoad(load float64) {
 	s.mu.Lock()
 	s.WhisperLoad = load
+	s.mu.Unlock()
+	s.emitStatus()
+}
+
+func (s *AppState) SetCEDLoad(ms float64) {
+	s.mu.Lock()
+	s.CEDLoadMs = ms
 	s.mu.Unlock()
 	s.emitStatus()
 }
@@ -179,6 +189,7 @@ func (s *AppState) emitStatus() {
 		"classification":  s.Classification,
 		"classifierTier":  s.ClassifierTier,
 		"whisperLoad":     s.WhisperLoad,
+		"cedLoadMs":       s.CEDLoadMs,
 	}
 	s.mu.RUnlock()
 	s.emit("status:update", data)
