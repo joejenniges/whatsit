@@ -1,6 +1,8 @@
 *.exe
 *.dll
 *.zip
+*.onnx
+*.onnx.data
 dist/
 build/
 frontend/node_modules/
