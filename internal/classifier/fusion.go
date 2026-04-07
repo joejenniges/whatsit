@@ -148,11 +148,18 @@ func (f *FusionClassifier) classifyInternal(samples []float32) FusionResult {
 		raw = ClassSpeech
 
 	case cedResult.IsSinging && hasBeat:
-		// Singing over music -- this is the rock lyrics case.
-		// WHY music: Singing + beat = song playing. Don't transcribe lyrics.
-		raw = ClassMusic
-		genre = cedResult.Genre
-		genreScore = cedResult.GenreScore
+		// Singing + beat detected. Usually music with lyrics.
+		// BUT: CED's "Singing" label has false positives on energetic speech.
+		// If the TOP label is a speech label, trust that over the singing flag.
+		// WHY: at 15:37:38, an announcer saying "Just let it go!" triggered
+		// singing=true top=Music(0.63) rhythm=0.429 -- but it was speech.
+		if cedResult.IsSpeech && isSpeechLabel(cedResult.TopLabel) {
+			raw = ClassSpeech
+		} else {
+			raw = ClassMusic
+			genre = cedResult.Genre
+			genreScore = cedResult.GenreScore
+		}
 
 	case cedResult.IsSinging && noBeat:
 		// Acapella -- transcribe it.
