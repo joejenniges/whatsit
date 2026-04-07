@@ -176,6 +176,11 @@ func (a *App) SaveConfig(cfg config.Config) error {
 		a.orchestrator.SetSaveAudio(cfg.SaveAudio)
 	}
 
+	// Update fusion classifier thresholds live (no restart needed).
+	if a.orchestrator != nil {
+		a.orchestrator.UpdateClassifierThresholds(cfg.RhythmMusicMin, cfg.RhythmSpeechMax, cfg.CEDSpeechMin, cfg.CEDMusicMin)
+	}
+
 	if a.wailsUI != nil && a.wailsUI.onSave != nil {
 		a.wailsUI.onSave(&cfg)
 	} else {

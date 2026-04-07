@@ -243,6 +243,18 @@ func (o *Orchestrator) finishInit(modelPath string) {
 			log.Printf("app: fusion classifier failed (%v), falling back to whisper+rhythm", fusionErr)
 			tier = "whisper+rhythm"
 		} else {
+			// Apply config thresholds if set.
+			if o.config.RhythmMusicMin > 0 || o.config.RhythmSpeechMax > 0 {
+				rm := o.config.RhythmMusicMin
+				rs := o.config.RhythmSpeechMax
+				cs := o.config.CEDSpeechMin
+				cm := o.config.CEDMusicMin
+				if rm <= 0 { rm = 0.25 }
+				if rs <= 0 { rs = 0.15 }
+				if cs <= 0 { cs = 0.3 }
+				if cm <= 0 { cm = 0.3 }
+				fc.UpdateThresholds(rm, rs, cs, cm)
+			}
 			o.classifier = fc
 		}
 	}
@@ -354,6 +366,18 @@ func (o *Orchestrator) finishInitParakeet(modelPath, vocabPath string) {
 			log.Printf("app: fusion classifier failed (%v), falling back to whisper+rhythm", fusionErr)
 			tier = "whisper+rhythm"
 		} else {
+			// Apply config thresholds if set.
+			if o.config.RhythmMusicMin > 0 || o.config.RhythmSpeechMax > 0 {
+				rm := o.config.RhythmMusicMin
+				rs := o.config.RhythmSpeechMax
+				cs := o.config.CEDSpeechMin
+				cm := o.config.CEDMusicMin
+				if rm <= 0 { rm = 0.25 }
+				if rs <= 0 { rs = 0.15 }
+				if cs <= 0 { cs = 0.3 }
+				if cm <= 0 { cm = 0.3 }
+				fc.UpdateThresholds(rm, rs, cs, cm)
+			}
 			o.classifier = fc
 		}
 	}
@@ -787,7 +811,11 @@ func (o *Orchestrator) flushSpeechBuffer() {
 	// classifier bouncing, not real speech. "To be" came from a 4-second
 	// segment. Real DJ speech (questions, announcements) is 10+ seconds.
 	// 8 seconds filters out brief lyric fragments while keeping real speech.
-	minSamples := whisperSampleRate * 8
+	minSecs := o.config.MinSpeechSecs
+	if minSecs <= 0 {
+		minSecs = 8
+	}
+	minSamples := whisperSampleRate * minSecs
 	if len(samples) < minSamples {
 		log.Printf("app: discarding short speech segment: %d samples (%.1fs < 4s minimum)",
 			len(samples), float64(len(samples))/float64(whisperSampleRate))
@@ -847,6 +875,21 @@ func (o *Orchestrator) endRecorderSegment() {
 		log.Printf("app: end audio segment: %v", err)
 	} else if path != "" {
 		log.Printf("app: saved audio segment: %s", path)
+	}
+}
+
+// UpdateClassifierThresholds updates the fusion classifier's thresholds at runtime.
+func (o *Orchestrator) UpdateClassifierThresholds(rhythmMusicMin, rhythmSpeechMax, cedSpeechMin, cedMusicMin float64) {
+	if fc, ok := o.classifier.(*classifier.FusionClassifier); ok {
+		rm := rhythmMusicMin
+		rs := rhythmSpeechMax
+		cs := cedSpeechMin
+		cm := cedMusicMin
+		if rm <= 0 { rm = 0.25 }
+		if rs <= 0 { rs = 0.15 }
+		if cs <= 0 { cs = 0.3 }
+		if cm <= 0 { cm = 0.3 }
+		fc.UpdateThresholds(rm, rs, cs, cm)
 	}
 }
 

@@ -62,6 +62,7 @@ func NewFusionClassifier(cedModelPath string, sampleRate int, debug bool) (*Fusi
 		cedMusicMin:     0.3,
 		rhythmMusicMin:  0.25,
 		rhythmSpeechMax: 0.15,
+		// Note: these defaults can be overridden via UpdateThresholds.
 		lastClass:       ClassSilence,
 		debounceN:       2,
 	}, nil
@@ -242,6 +243,17 @@ func (f *FusionClassifier) debounce(raw Classification) ClassifyResult {
 // Name returns the classifier name for display.
 func (f *FusionClassifier) Name() string {
 	return "ced-tiny+rhythm"
+}
+
+// UpdateThresholds updates the classifier's thresholds at runtime.
+// Called when the user saves settings without restarting.
+func (f *FusionClassifier) UpdateThresholds(rhythmMusicMin, rhythmSpeechMax, cedSpeechMin, cedMusicMin float64) {
+	f.rhythmMusicMin = rhythmMusicMin
+	f.rhythmSpeechMax = rhythmSpeechMax
+	f.cedSpeechMin = cedSpeechMin
+	f.cedMusicMin = cedMusicMin
+	log.Printf("fusion: thresholds updated: rhythmMusic=%.2f rhythmSpeech=%.2f cedSpeech=%.2f cedMusic=%.2f",
+		rhythmMusicMin, rhythmSpeechMax, cedSpeechMin, cedMusicMin)
 }
 
 // GetLastCEDResult returns the full CED result from the last classification.

@@ -27,6 +27,13 @@ type Config struct {
 	SaveAudio         bool   `yaml:"save_audio"`         // save pre-resampled stereo audio to WAV
 	UseGPU            bool   `yaml:"use_gpu"`            // attempt Vulkan GPU acceleration for whisper
 	ASREngine         string `yaml:"asr_engine"`         // "whisper" or "parakeet"
+
+	// Fusion classifier tuning (applies live, no restart needed)
+	RhythmMusicMin  float64 `yaml:"rhythm_music_min"`  // rhythm strength above this = "has beat" (default: 0.25)
+	RhythmSpeechMax float64 `yaml:"rhythm_speech_max"` // rhythm strength below this = "no beat" (default: 0.15)
+	CEDSpeechMin    float64 `yaml:"ced_speech_min"`    // CED speech score threshold (default: 0.3)
+	CEDMusicMin     float64 `yaml:"ced_music_min"`     // CED music score threshold (default: 0.3)
+	MinSpeechSecs   int     `yaml:"min_speech_secs"`   // minimum speech segment duration (default: 8)
 }
 
 // DefaultConfig returns a Config populated with default values.
@@ -40,7 +47,12 @@ func DefaultConfig() Config {
 		TranscriptionMode: "segment",
 		WindowSizeSecs:    10,
 		WindowStepSecs:    3,
-		UseGPU:         true,
+		UseGPU:          true,
+		RhythmMusicMin:  0.25,
+		RhythmSpeechMax: 0.15,
+		CEDSpeechMin:    0.3,
+		CEDMusicMin:     0.3,
+		MinSpeechSecs:   8,
 	}
 }
 

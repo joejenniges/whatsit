@@ -13,6 +13,11 @@
   let windowSize = $state(10);
   let windowStep = $state(3);
   let classifierDebug = $state(false);
+  let rhythmMusicMin = $state(0.25);
+  let rhythmSpeechMax = $state(0.15);
+  let cedSpeechMin = $state(0.3);
+  let cedMusicMin = $state(0.3);
+  let minSpeechSecs = $state(8);
 
   // Original values (from last save/load) for dirty detection.
   // Must be $state so $derived tracks changes to it.
@@ -27,7 +32,7 @@
   const restartFields = ['asrEngine', 'modelSize', 'classifierTier', 'transcriptionMode', 'useGpu'];
 
   function currentValues(): Record<string, any> {
-    return { streamUrl, asrEngine, modelSize, classifierTier, transcriptionMode, useGpu, language, saveAudio, windowSize, windowStep, classifierDebug };
+    return { streamUrl, asrEngine, modelSize, classifierTier, transcriptionMode, useGpu, language, saveAudio, windowSize, windowStep, classifierDebug, rhythmMusicMin, rhythmSpeechMax, cedSpeechMin, cedMusicMin, minSpeechSecs };
   }
 
   let dirty = $derived(JSON.stringify(currentValues()) !== JSON.stringify(original));
@@ -63,6 +68,11 @@
       windowSize = cfg.WindowSizeSecs || 10;
       windowStep = cfg.WindowStepSecs || 3;
       classifierDebug = cfg.ClassifierDebug || false;
+      rhythmMusicMin = cfg.RhythmMusicMin || 0.25;
+      rhythmSpeechMax = cfg.RhythmSpeechMax || 0.15;
+      cedSpeechMin = cfg.CEDSpeechMin || 0.3;
+      cedMusicMin = cfg.CEDMusicMin || 0.3;
+      minSpeechSecs = cfg.MinSpeechSecs || 8;
       original = currentValues();
     } catch {
       original = currentValues();
@@ -89,6 +99,11 @@
         WindowStepSecs: windowStep,
         SaveAudio: saveAudio,
         UseGPU: useGpu,
+        RhythmMusicMin: rhythmMusicMin,
+        RhythmSpeechMax: rhythmSpeechMax,
+        CEDSpeechMin: cedSpeechMin,
+        CEDMusicMin: cedMusicMin,
+        MinSpeechSecs: minSpeechSecs,
       });
       original = currentValues();
       if (restartNeeded) {
@@ -216,6 +231,36 @@
       <input type="checkbox" bind:checked={classifierDebug} />
       Log classifier feature values (debug)
     </label>
+  </section>
+
+  <!-- Classifier Tuning -->
+  <section class="section">
+    <h3>Classifier Tuning (applies live)</h3>
+    <p class="section-hint">Adjust thresholds for the fusion (CED + rhythm) classifier. Watch the status bar values while tuning.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="rhythm-music-min">Rhythm "has beat" threshold</label>
+        <input id="rhythm-music-min" type="number" bind:value={rhythmMusicMin} min="0.05" max="0.8" step="0.05" />
+      </div>
+      <div class="form-group">
+        <label for="rhythm-speech-max">Rhythm "no beat" threshold</label>
+        <input id="rhythm-speech-max" type="number" bind:value={rhythmSpeechMax} min="0.05" max="0.5" step="0.05" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="ced-speech-min">CED speech score min</label>
+        <input id="ced-speech-min" type="number" bind:value={cedSpeechMin} min="0.1" max="0.8" step="0.05" />
+      </div>
+      <div class="form-group">
+        <label for="ced-music-min">CED music score min</label>
+        <input id="ced-music-min" type="number" bind:value={cedMusicMin} min="0.1" max="0.8" step="0.05" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="min-speech-secs">Min speech segment (seconds)</label>
+      <input id="min-speech-secs" type="number" bind:value={minSpeechSecs} min="2" max="20" step="1" />
+    </div>
   </section>
 
   <!-- Advanced -->
