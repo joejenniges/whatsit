@@ -126,77 +126,55 @@ func (f *FusionClassifier) classifyInternal(samples []float32) FusionResult {
 	rhythmStrength := f.rhythm.AddChunkAndAnalyze(samples)
 
 	// 4. Fusion decision.
+	//
+	// SIMPLE RULES (no genre-specific logic):
+	//   - CED top label is the primary signal (what does the audio sound like?)
+	//   - Rhythm is the tiebreaker (is there a beat?)
+	//   - When in doubt, default to speech (better to transcribe than miss)
+	//
+	// The boolean flags (IsSpeech, IsMusic, IsSinging) are too noisy on radio.
+	// CED flags both speech AND music for almost everything. The TOP LABEL
+	// is more reliable because it represents CED's best guess, not just
+	// whether a threshold was crossed.
+
 	hasBeat := rhythmStrength > f.rhythmMusicMin
-	noBeat := rhythmStrength < f.rhythmSpeechMax
+	topIsSpeech := isSpeechLabel(cedResult.TopLabel)
+	topIsMusic := isMusicLabel(cedResult.TopLabel) || isGenreLabel(cedResult.TopLabel)
 
 	var raw Classification
 	var genre string
 	var genreScore float64
 
 	switch {
-	// WHY rhythm-primary for speech+music: On radio stations, CED flags
-	// both speech=true AND music=true for almost EVERYTHING (the station's
-	// audio processing, studio ambience, etc. read as "musical" to CED).
-	// The Music label alone is unreliable. Rhythm is the tiebreaker.
-	//
-	// Decision priority:
-	// 1. Singing + strong beat = music (lyrics)
-	// 2. Speech flagged + no strong beat = speech (even if Music is also flagged)
-	// 3. Music only (no speech) + beat = music
-	// 4. Music only (no speech) + no beat = music (ambient/classical)
-	// 5. Ambiguous = default to speech (bias toward transcription)
-
-	case cedResult.IsSinging && hasBeat && !(cedResult.IsSpeech && isSpeechLabel(cedResult.TopLabel)):
-		// Singing + beat, and the top label isn't a speech label.
-		// This is the rock/pop lyrics case.
-		raw = ClassMusic
-		genre = cedResult.Genre
-		genreScore = cedResult.GenreScore
-
-	case cedResult.IsSpeech && !hasBeat:
-		// Speech detected and no strong beat. Classify as speech regardless
-		// of whether CED also flags Music (it almost always does on radio).
+	case topIsSpeech && !hasBeat:
+		// CED's best guess is speech and no beat. Clear speech.
 		raw = ClassSpeech
 
-	case cedResult.IsSpeech && hasBeat && !cedResult.IsSinging:
-		// Speech + beat but no singing. Could be DJ over music bed OR
-		// heavy metal/harsh vocals that CED doesn't flag as "Singing".
-		// WHY check top label: if CED's TOP label is Music or a genre,
-		// the audio is primarily musical even though speech is also flagged.
-		// Heavy metal vocals at rhythm 0.30-0.50 were leaking through
-		// because singing=false (harsh vocals != typical singing to CED).
-		if isMusicLabel(cedResult.TopLabel) || isGenreLabel(cedResult.TopLabel) {
-			raw = ClassMusic
-			genre = cedResult.Genre
-			genreScore = cedResult.GenreScore
-		} else {
-			raw = ClassSpeech
-		}
+	case topIsSpeech && hasBeat:
+		// CED says speech but there's a beat. DJ over music bed.
+		// Bias toward speech -- better to transcribe.
+		raw = ClassSpeech
 
-	case !cedResult.IsSpeech && cedResult.IsMusic && hasBeat:
-		// Music without any speech flag + beat. Clear music.
+	case topIsMusic && hasBeat:
+		// CED says music and there's a beat. Clear music.
 		raw = ClassMusic
 		genre = cedResult.Genre
 		genreScore = cedResult.GenreScore
 
-	case !cedResult.IsSpeech && cedResult.IsMusic && !hasBeat:
-		// Music without speech, no beat. Ambient/classical/slow.
+	case topIsMusic && !hasBeat:
+		// CED says music but no beat. Could be ambient, slow song,
+		// or a brief pause in the beat. Trust CED.
 		raw = ClassMusic
 		genre = cedResult.Genre
 		genreScore = cedResult.GenreScore
 
-	case !cedResult.IsSpeech && !cedResult.IsMusic && hasBeat:
-		// Nothing flagged but rhythm detected -- instrumental.
+	case !topIsSpeech && !topIsMusic && hasBeat:
+		// Top label is something else (Drum, Guitar, etc.) with beat.
+		// Likely instrumental music.
 		raw = ClassMusic
-
-	case !cedResult.IsSpeech && !cedResult.IsMusic && !cedResult.IsSinging && noBeat:
-		// Nothing detected -- silence or noise.
-		raw = ClassSilence
 
 	default:
-		// Ambiguous -- default to speech (bias toward transcription).
-		// WHY speech: False positives on speech are cheaper than missing
-		// speech. Whisper will just transcribe silence/noise as empty string.
+		// Ambiguous. Default to speech.
 		raw = ClassSpeech
 	}
 
