@@ -12,7 +12,6 @@ import (
 	"github.com/joe/radio-transcriber/internal/audio"
 	"github.com/joe/radio-transcriber/internal/classifier"
 	"github.com/joe/radio-transcriber/internal/config"
-	"github.com/joe/radio-transcriber/internal/musicid"
 	"github.com/joe/radio-transcriber/internal/storage"
 	"github.com/joe/radio-transcriber/internal/transcriber"
 )
@@ -55,24 +54,14 @@ type Orchestrator struct {
 	classifier  classifier.AudioClassifier
 	transcriber transcriber.ASREngine
 
-	// WHY optional: musicid requires libchromaprint and an AcoustID API key.
-	// If either is unavailable, we still run -- just skip song identification.
-	fingerprinter  *musicid.Fingerprinter
-	acoustidClient *musicid.AcoustIDClient
-
 	// WHY: Listener plays decoded stereo PCM through speakers when the user
 	// toggles "Listen" on. It sits between decoder and resampler in the
 	// pipeline -- pre-resampling so the user hears full-quality stereo audio.
 	listener *audio.Listener
 
-	speechBuffer   *audio.Buffer // segment mode: accumulate speech, transcribe on transition
-	musicBuffer    *audio.Buffer
-	rawMusicBuffer []int16 // original stereo int16 for Chromaprint fingerprinting
-	rawMusicRate   int     // sample rate of raw audio
-	rawMusicMu     sync.Mutex
-	musicSamples  int  // total music samples accumulated (not reset on bounce)
-	musicMarkerUp bool // true if a "Song played" marker is currently showing
-	musicDBLogged bool // true if we've already written a music_unknown DB entry for this segment
+	speechBuffer  *audio.Buffer // segment mode: accumulate speech, transcribe on transition
+	musicMarkerUp bool          // true if a "Song played" marker is currently showing
+	musicDBLogged bool          // true if we've already written a music_unknown DB entry for this segment
 	listenWanted  bool // true if user checked Listen before streaming started
 	recorder      *audio.SegmentRecorder
 
@@ -236,25 +225,6 @@ func (o *Orchestrator) finishInit(modelPath string) {
 	}
 	o.transcriber = t
 
-	// Try to init fingerprinter. Non-fatal if it fails (chromaprint may not be installed).
-	fp, fpErr := musicid.NewFingerprinter()
-	if fpErr != nil {
-		log.Printf("app: fingerprinter unavailable, music ID disabled: %v", fpErr)
-	} else {
-		o.fingerprinter = fp
-	}
-
-	// Init AcoustID client if API key is configured.
-	if o.config.AcoustIDKey != "" {
-		client, clientErr := musicid.NewAcoustIDClient(o.config.AcoustIDKey)
-		if clientErr != nil {
-			log.Printf("app: acoustid client init failed: %v", clientErr)
-		} else {
-			o.acoustidClient = client
-			log.Printf("app: acoustid client initialized")
-		}
-	}
-
 	tier := o.config.ClassifierTier
 	if tier == "" {
 		tier = "scheirer"
@@ -350,24 +320,6 @@ func (o *Orchestrator) finishInitParakeet(modelPath, vocabPath string) {
 		log.Fatalf("app: init parakeet engine: %v", err)
 	}
 	o.transcriber = t
-
-	// Fingerprinter + AcoustID (same as finishInit).
-	fp, fpErr := musicid.NewFingerprinter()
-	if fpErr != nil {
-		log.Printf("app: fingerprinter unavailable, music ID disabled: %v", fpErr)
-	} else {
-		o.fingerprinter = fp
-	}
-
-	if o.config.AcoustIDKey != "" {
-		client, clientErr := musicid.NewAcoustIDClient(o.config.AcoustIDKey)
-		if clientErr != nil {
-			log.Printf("app: acoustid client init failed: %v", clientErr)
-		} else {
-			o.acoustidClient = client
-			log.Printf("app: acoustid client initialized")
-		}
-	}
 
 	tier := o.config.ClassifierTier
 	if tier == "" {
@@ -474,7 +426,6 @@ func (o *Orchestrator) startStreaming() {
 	}
 	audioDir := filepath.Join(appDir, "audio")
 	o.recorder = audio.NewSegmentRecorder(audioDir, inputRate, 2, o.config.SaveAudio)
-	o.rawMusicRate = inputRate
 
 	// Initialize the audio listener once. Reuse across start/stop cycles
 	// because oto only allows one context per process lifetime.
@@ -512,18 +463,6 @@ func (o *Orchestrator) startStreaming() {
 			if o.recorder != nil {
 				o.recorder.WriteInt16(samples)
 			}
-			// Buffer raw stereo int16 for Chromaprint fingerprinting.
-			// WHY here: Chromaprint needs the original pre-resampled audio
-			// (48kHz stereo) to produce valid fingerprints. AcoustID was
-			// rejecting fingerprints from 16kHz mono as "invalid fingerprint".
-			o.rawMusicMu.Lock()
-			o.rawMusicBuffer = append(o.rawMusicBuffer, samples...)
-			// Cap at ~60 seconds of stereo audio at the stream rate.
-			maxRaw := o.rawMusicRate * 2 * 60
-			if len(o.rawMusicBuffer) > maxRaw {
-				o.rawMusicBuffer = o.rawMusicBuffer[len(o.rawMusicBuffer)-maxRaw:]
-			}
-			o.rawMusicMu.Unlock()
 			// Forward to resampler.
 			select {
 			case resamplerInput <- samples:
@@ -537,9 +476,8 @@ func (o *Orchestrator) startStreaming() {
 	o.resampler = audio.NewResampler(resamplerInput, inputRate, whisperSampleRate)
 	o.resampler.Start(o.ctx)
 
-	// Buffers for speech and music audio. Sized for ~60s of 16kHz mono.
+	// Buffer for speech audio. Sized for ~60s of 16kHz mono.
 	o.speechBuffer = audio.NewBuffer(whisperSampleRate * 60)
-	o.musicBuffer = audio.NewBuffer(whisperSampleRate * 60)
 
 	o.streaming = true
 	o.ui.UpdateStatus(true, "connected")
@@ -637,7 +575,6 @@ func (o *Orchestrator) processingLoop() {
 				o.flushSpeechBuffer()
 				o.endRecorderSegment()
 				o.transcriber.Reset()
-				o.flushMusicBuffer()
 				silenceSamples = 0
 			}
 		} else {
@@ -658,7 +595,6 @@ func (o *Orchestrator) processingLoop() {
 	o.flushSpeechBuffer()
 	o.endRecorderSegment()
 	o.transcriber.Reset()
-	o.flushMusicBuffer()
 	o.ui.UpdateStatus(false, "disconnected")
 }
 
@@ -681,8 +617,17 @@ func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
 		o.flushSpeechBuffer()
 		o.transcriber.Reset()
 		if !o.musicMarkerUp {
+			// Write one DB entry and one UI marker per music segment.
+			entry := &storage.LogEntry{
+				Timestamp: time.Now(),
+				EntryType: "music_unknown",
+			}
+			if dbErr := o.db.InsertEntry(entry); dbErr != nil {
+				log.Printf("app: insert music entry: %v", dbErr)
+			}
 			o.ui.AppendMusic()
 			o.musicMarkerUp = true
+			o.musicDBLogged = true
 		}
 	}
 
@@ -696,7 +641,6 @@ func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
 	}
 
 	if from == classifier.ClassMusic && to == classifier.ClassSilence {
-		o.flushMusicBuffer()
 		o.musicMarkerUp = false
 		o.musicDBLogged = false
 	}
@@ -767,19 +711,6 @@ func (o *Orchestrator) processChunkAs(class classifier.Classification, chunk []f
 			log.Printf("app: start music segment: %v", err)
 		}
 
-		o.musicBuffer.Write(chunk)
-		o.musicSamples += len(chunk)
-
-		// WHY musicSamples instead of musicBuffer.Duration(): When the
-		// classifier bounces (music->speech->music), handleTransition
-		// flushes the music buffer each time. With musicSamples we track
-		// total music audio seen across bounces, so fingerprinting still
-		// triggers even if the buffer keeps getting drained.
-		if o.musicSamples >= whisperSampleRate*15 {
-			o.musicSamples = 0
-			go o.identifyMusic()
-		}
-
 	case classifier.ClassSilence:
 		// Don't feed silence to transcriber or music buffer.
 	}
@@ -826,105 +757,6 @@ func (o *Orchestrator) flushSpeechBuffer() {
 	// gets a fresh marker and DB entry.
 	o.musicMarkerUp = false
 	o.musicDBLogged = false
-}
-
-// flushMusicBuffer identifies whatever is in the music buffer.
-func (o *Orchestrator) flushMusicBuffer() {
-	if o.musicBuffer == nil || o.musicBuffer.Len() == 0 {
-		return
-	}
-	go o.identifyMusic()
-}
-
-// identifyMusic drains the music buffer, fingerprints it, and tries to
-// identify the song via AcoustID. If identified, replaces the UI's
-// "Music playing" placeholder with the song name.
-func (o *Orchestrator) identifyMusic() {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("PANIC in identifyMusic: %v\n%s", r, debug.Stack())
-		}
-	}()
-
-	samples := o.musicBuffer.ReadAll()
-	if len(samples) == 0 {
-		return
-	}
-
-	// Grab the raw stereo int16 audio for fingerprinting.
-	o.rawMusicMu.Lock()
-	rawSamples := make([]int16, len(o.rawMusicBuffer))
-	copy(rawSamples, o.rawMusicBuffer)
-	o.rawMusicBuffer = o.rawMusicBuffer[:0]
-	o.rawMusicMu.Unlock()
-
-	durationMs := int64(len(samples)) * 1000 / int64(whisperSampleRate)
-
-	log.Printf("app: identifyMusic: %d resampled samples, %d raw stereo samples", len(samples), len(rawSamples))
-
-	// Try fingerprinting + AcoustID lookup if available.
-	if o.fingerprinter == nil {
-		log.Printf("app: identifyMusic: fingerprinter not available, skipping")
-	} else if o.acoustidClient == nil {
-		log.Printf("app: identifyMusic: no AcoustID API key configured, skipping")
-	} else if len(rawSamples) == 0 {
-		log.Printf("app: identifyMusic: no raw audio available for fingerprinting")
-	}
-	if o.fingerprinter != nil && o.acoustidClient != nil && len(rawSamples) > 0 {
-		log.Printf("app: fingerprinting %d raw samples at %dHz stereo (%ds)", len(rawSamples), o.rawMusicRate, len(rawSamples)/o.rawMusicRate/2)
-		fp, dur, fpErr := o.fingerprinter.FingerprintInt16(rawSamples, o.rawMusicRate, 2)
-		if fpErr != nil {
-			log.Printf("app: fingerprint error: %v", fpErr)
-		} else {
-			log.Printf("app: fingerprint OK, duration=%ds, fp_len=%d, fp_prefix=%s, sending to AcoustID", dur, len(fp), fp[:min(60, len(fp))])
-			song, lookupErr := o.acoustidClient.Identify(fp, dur)
-			if lookupErr != nil {
-				log.Printf("app: acoustid lookup error: %v", lookupErr)
-			} else if song == nil {
-				log.Printf("app: acoustid: no match found")
-			}
-			if song != nil {
-				log.Printf("app: identified song: %q by %s (score %.2f)", song.Title, song.Artist, song.Score)
-				entry := &storage.LogEntry{
-					Timestamp:  time.Now(),
-					EntryType:  "song",
-					Content:    song.Title + " - " + song.Artist,
-					Title:      song.Title,
-					Artist:     song.Artist,
-					Album:      song.Album,
-					Confidence: song.Score,
-					DurationMs: durationMs,
-					AudioPath:  o.recorder.CurrentPath(),
-				}
-				if err := o.db.InsertEntry(entry); err != nil {
-					log.Printf("app: insert song entry: %v", err)
-				}
-				// Replace the "Music playing" placeholder with the actual song.
-				o.ui.AppendSong(song.Title, song.Artist, entry.ID)
-				// Reset so the next song gets a fresh marker and DB entry.
-				o.musicMarkerUp = false
-				o.musicDBLogged = false
-				return
-			}
-		}
-	}
-
-	// No song identified -- log ONE music_unknown entry per music segment.
-	// WHY: identifyMusic fires every 15s of music. Without this guard,
-	// the DB accumulates a "music_unknown" entry every 15 seconds, which
-	// all show up as separate "Song played" lines on the next launch.
-	if !o.musicDBLogged {
-		o.musicDBLogged = true
-		entry := &storage.LogEntry{
-			Timestamp:  time.Now(),
-			EntryType:  "music_unknown",
-			DurationMs: durationMs,
-			AudioPath:  o.recorder.CurrentPath(),
-		}
-		if err := o.db.InsertEntry(entry); err != nil {
-			log.Printf("app: insert music entry: %v", err)
-		}
-	}
 }
 
 // endRecorderSegment closes the current audio segment file.
@@ -979,9 +811,6 @@ func (o *Orchestrator) shutdown() {
 		o.listener.SetEnabled(false)
 		o.listener.Close()
 		o.listener = nil
-	}
-	if o.fingerprinter != nil {
-		o.fingerprinter.Close()
 	}
 	if o.db != nil {
 		if err := o.db.Close(); err != nil {

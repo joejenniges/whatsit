@@ -57,12 +57,11 @@ func TestSaveAndLoad(t *testing.T) {
 	dir := t.TempDir()
 
 	original := &Config{
-		StreamURL:   "http://example.com/stream.mp3",
-		ModelSize:   "small",
-		ModelPath:   "/some/path/model.bin",
-		AcoustIDKey: "test-key-123",
-		Language:    "es",
-		BufferSecs:  20,
+		StreamURL:  "http://example.com/stream.mp3",
+		ModelSize:  "small",
+		ModelPath:  "/some/path/model.bin",
+		Language:   "es",
+		BufferSecs: 20,
 	}
 
 	if err := SaveTo(original, dir); err != nil {
@@ -82,9 +81,6 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if loaded.ModelPath != original.ModelPath {
 		t.Errorf("ModelPath: got %q, want %q", loaded.ModelPath, original.ModelPath)
-	}
-	if loaded.AcoustIDKey != original.AcoustIDKey {
-		t.Errorf("AcoustIDKey: got %q, want %q", loaded.AcoustIDKey, original.AcoustIDKey)
 	}
 	if loaded.Language != original.Language {
 		t.Errorf("Language: got %q, want %q", loaded.Language, original.Language)

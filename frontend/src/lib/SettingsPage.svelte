@@ -7,7 +7,6 @@
   let classifierTier = $state('basic');
   let transcriptionMode = $state('segment');
   let useGpu = $state(false);
-  let acoustIdKey = $state('');
   let language = $state('en');
   let saveAudio = $state(false);
   let windowSize = $state(5);
@@ -26,7 +25,6 @@
       classifierTier = cfg.ClassifierTier || 'basic';
       transcriptionMode = cfg.TranscriptionMode || 'segment';
       useGpu = cfg.UseGPU || false;
-      acoustIdKey = cfg.AcoustIDKey || '';
       language = cfg.Language || 'en';
       saveAudio = cfg.SaveAudio || false;
       windowSize = cfg.WindowSizeSecs || 5;
@@ -47,7 +45,6 @@
         ASREngine: asrEngine,
         ModelSize: modelSize,
         ModelPath: '',
-        AcoustIDKey: acoustIdKey,
         Language: language,
         BufferSecs: 0,
         ClassifierTier: classifierTier,
@@ -140,15 +137,6 @@
       <input type="checkbox" bind:checked={classifierDebug} />
       Log classifier feature values (debug)
     </label>
-  </section>
-
-  <!-- Song Identification -->
-  <section class="section">
-    <h3>Song Identification</h3>
-    <div class="form-group">
-      <label for="acoustid-key">AcoustID API Key</label>
-      <input id="acoustid-key" type="text" bind:value={acoustIdKey} placeholder="Get a free key at acoustid.org" />
-    </div>
   </section>
 
   <!-- Advanced -->

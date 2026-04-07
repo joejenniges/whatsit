@@ -17,7 +17,6 @@ type Config struct {
 	StreamURL       string `yaml:"stream_url"`
 	ModelSize       string `yaml:"model_size"`
 	ModelPath       string `yaml:"model_path"`
-	AcoustIDKey     string `yaml:"acoustid_key"`
 	Language        string `yaml:"language"`
 	BufferSecs      int    `yaml:"buffer_secs"`
 	ClassifierTier    string `yaml:"classifier_tier"`    // basic, scheirer, mfcc

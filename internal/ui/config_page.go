@@ -27,7 +27,6 @@ type ConfigPage struct {
 	useGPUCheck         *widget.Check
 	classifierSelect    *widget.Select
 	saveAudioCheck      *widget.Check
-	acoustIDEntry       *widget.Entry
 	languageSelect      *widget.Select
 	bufferSecsEntry     *widget.Entry
 	windowSizeEntry     *widget.Entry
@@ -93,11 +92,6 @@ func NewConfigPage(cfg *config.Config, onSave func(*config.Config)) *ConfigPage 
 	cp.saveAudioCheck = widget.NewCheck("Save original stereo audio to WAV files", nil)
 	cp.saveAudioCheck.SetChecked(cfg.SaveAudio)
 
-	// AcoustID API Key
-	cp.acoustIDEntry = widget.NewEntry()
-	cp.acoustIDEntry.SetPlaceHolder("AcoustID API key (optional)")
-	cp.acoustIDEntry.SetText(cfg.AcoustIDKey)
-
 	// Language
 	cp.languageSelect = widget.NewSelect(supportedLanguages, nil)
 	cp.languageSelect.SetSelected(cfg.Language)
@@ -152,7 +146,6 @@ func NewConfigPage(cfg *config.Config, onSave func(*config.Config)) *ConfigPage 
 		widget.NewLabel("GPU"), cp.useGPUCheck,
 		widget.NewLabel("Classifier Tier"), cp.classifierSelect,
 		widget.NewLabel("Save Audio"), cp.saveAudioCheck,
-		widget.NewLabel("AcoustID Key"), cp.acoustIDEntry,
 		widget.NewLabel("Language"), cp.languageSelect,
 		widget.NewLabel("Buffer (seconds)"), cp.bufferSecsEntry,
 		widget.NewLabel("Window Size (s)"), cp.windowSizeEntry,
@@ -205,7 +198,6 @@ func (cp *ConfigPage) handleSave() {
 	cp.cfg.UseGPU = cp.useGPUCheck.Checked
 	cp.cfg.ClassifierTier = cp.classifierSelect.Selected
 	cp.cfg.SaveAudio = cp.saveAudioCheck.Checked
-	cp.cfg.AcoustIDKey = cp.acoustIDEntry.Text
 	cp.cfg.Language = cp.languageSelect.Selected
 	cp.cfg.BufferSecs = bufSecs
 	cp.cfg.WindowSizeSecs = winSize
