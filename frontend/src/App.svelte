@@ -4,59 +4,20 @@
   import SettingsPage from './lib/SettingsPage.svelte';
   import DownloadScreen from './lib/DownloadScreen.svelte';
   import GpuWarning from './lib/GpuWarning.svelte';
+  import { init, getDownload, getGPUWarning, subscribe } from './store';
 
-  type View = 'loading' | 'main' | 'download';
   type Tab = 'live' | 'settings';
-
-  let currentView: View = $state('loading');
   let currentTab: Tab = $state('live');
+  let download = $state({ active: false, percent: 0, message: '' });
   let gpuWarning = $state('');
-  let downloadModelSize = $state('');
-
-  // Download progress state managed here since DownloadScreen
-  // can't easily set up its own event listeners before mount
-  let downloadPercent = $state(0);
-  let downloadSpeed = $state('');
-  let downloadEta = $state('');
 
   onMount(() => {
-    setupEvents();
-    // WHY no checkModelStatus here: the orchestrator handles the download
-    // flow and emits show-main or show-download. Calling GetModelStatus
-    // raced with startup() and showed the download screen even when models
-    // existed. The frontend starts in "loading" and waits for the event.
-    // Safety timeout: if no event arrives in 5s, assume main view.
-    setTimeout(() => {
-      if (currentView === 'loading') currentView = 'main';
-    }, 5000);
+    init();
+    return subscribe(() => {
+      download = getDownload();
+      gpuWarning = getGPUWarning();
+    });
   });
-
-  async function setupEvents() {
-    try {
-      const { EventsOn } = await import('../wailsjs/runtime/runtime');
-
-      EventsOn('show-main', () => {
-        currentView = 'main';
-      });
-
-      EventsOn('show-download', (data: any) => {
-        currentView = 'download';
-        downloadModelSize = data?.modelSize || '';
-      });
-
-      EventsOn('gpu-warning', (message: string) => {
-        gpuWarning = message;
-      });
-
-      EventsOn('download-progress', (data: any) => {
-        downloadPercent = data.percent || 0;
-        downloadSpeed = data.speed || '';
-        downloadEta = data.eta || '';
-      });
-    } catch {
-      // Runtime not available in dev mode
-    }
-  }
 </script>
 
 <div class="app">
@@ -64,15 +25,13 @@
     <GpuWarning message={gpuWarning} />
   {/if}
 
-  {#if currentView === 'loading'}
-    <div class="loading">Starting...</div>
-  {:else if currentView === 'download'}
+  {#if download.active}
     <div class="view-container">
       <DownloadScreen
-        modelSize={downloadModelSize}
-        percent={downloadPercent}
-        speed={downloadSpeed}
-        eta={downloadEta}
+        modelSize=""
+        percent={download.percent}
+        speed=""
+        eta={download.message}
       />
     </div>
   {:else}
@@ -130,15 +89,7 @@
     color: #4a9eff;
     border-bottom-color: #4a9eff;
   }
-  .loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex: 1;
-    color: #666;
-    font-size: 14px;
-  }
-  .view-container {
+.view-container {
     flex: 1;
     overflow: hidden;
   }

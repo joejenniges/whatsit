@@ -9,16 +9,16 @@ import (
 
 	"github.com/joe/radio-transcriber/internal/config"
 	"github.com/joe/radio-transcriber/internal/storage"
-	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// WailsUI implements the app.UI interface by emitting Wails events to the
-// Svelte frontend instead of rendering a native GUI. This is the bridge
+// WailsUI implements the app.UI interface by delegating state changes to
+// AppState, which owns the data and emits Wails events. This is the bridge
 // between the orchestrator (which expects a UI to push updates to) and the
-// Wails WebView2 frontend.
+// centralized state management layer. See wails.md for the architecture.
 type WailsUI struct {
-	ctx  context.Context // Wails runtime context, set after startup
-	done chan struct{}    // closed on shutdown to unblock Run()
+	ctx   context.Context // Wails runtime context, set after startup
+	state *AppState       // central state -- all mutations go through here
+	done  chan struct{}    // closed on shutdown to unblock Run()
 
 	mu               sync.Mutex
 	musicMarkerShown bool // dedup: only emit one music-detected per segment
@@ -33,11 +33,12 @@ type WailsUI struct {
 	insertSong func() (*storage.LogEntry, error)
 }
 
-// NewWailsUI creates a WailsUI adapter. The ctx must be set later via
-// SetContext once the Wails runtime is ready (during startup).
-func NewWailsUI() *WailsUI {
+// NewWailsUI creates a WailsUI adapter. The state and ctx must be set later
+// via SetContext once the Wails runtime is ready (during startup).
+func NewWailsUI(state *AppState) *WailsUI {
 	return &WailsUI{
-		done: make(chan struct{}),
+		state: state,
+		done:  make(chan struct{}),
 	}
 }
 
@@ -82,84 +83,59 @@ func (w *WailsUI) SetInsertSongCallback(cb func() (*storage.LogEntry, error)) {
 }
 
 func (w *WailsUI) ShowDownloadScreen(modelsDir, modelSize string) {
-	if w.ctx == nil {
-		return
-	}
-	log.Printf("wails-ui: emitting show-download (modelSize=%s)", modelSize)
-	wailsRuntime.EventsEmit(w.ctx, "show-download", map[string]interface{}{
-		"modelSize": modelSize,
-	})
+	log.Printf("wails-ui: download screen (modelSize=%s)", modelSize)
+	w.state.SetDownloadProgress(0, "Starting download...")
 }
 
 func (w *WailsUI) ShowMainScreen() {
-	if w.ctx == nil {
-		return
-	}
-	log.Printf("wails-ui: emitting show-main")
-	wailsRuntime.EventsEmit(w.ctx, "show-main", nil)
+	log.Printf("wails-ui: main screen")
+	w.state.SetDownloadComplete()
 }
 
 func (w *WailsUI) UpdateDownloadProgress(downloaded, total int64) {
-	if w.ctx == nil {
-		return
-	}
 	var percent float64
-	var speed, eta string
+	var message string
 	if total > 0 {
-		percent = float64(downloaded) / float64(total)
+		percent = float64(downloaded) / float64(total) * 100
+		message = fmt.Sprintf("%s / %s", formatBytes(downloaded), formatBytes(total))
 	}
-	speed = formatBytes(downloaded) // simplified -- real speed needs delta tracking
-	eta = ""
-	wailsRuntime.EventsEmit(w.ctx, "download-progress", map[string]interface{}{
-		"downloaded": downloaded,
-		"total":      total,
-		"percent":    percent,
-		"speed":      speed,
-		"eta":        eta,
-	})
+	w.state.SetDownloadProgress(percent, message)
 }
 
 func (w *WailsUI) AppendTranscription(timestamp time.Time, text string, dbID int64) {
-	if w.ctx == nil {
-		return
-	}
-	wailsRuntime.EventsEmit(w.ctx, "transcription", map[string]interface{}{
-		"id":        dbID,
-		"timestamp": timestamp.Format(time.RFC3339),
-		"text":      text,
+	w.state.AddEntry(UIEntry{
+		ID:        dbID,
+		Timestamp: timestamp.Format(time.RFC3339),
+		Type:      "speech",
+		Content:   text,
 	})
 }
 
 func (w *WailsUI) AppendSong(title, artist string, dbID int64) {
-	if w.ctx == nil {
-		return
-	}
-	// Reset marker so the next song gets a fresh one.
+	// Reset marker so the next music segment gets a fresh one.
 	w.mu.Lock()
 	w.musicMarkerShown = false
 	w.mu.Unlock()
 
-	wailsRuntime.EventsEmit(w.ctx, "song-identified", map[string]interface{}{
-		"id":     dbID,
-		"title":  title,
-		"artist": artist,
+	// Update the existing music_unknown entry to a fully identified song.
+	// WHY UpdateEntry: when music starts, AppendMusic creates a music_unknown
+	// placeholder. Once identification succeeds, we update that entry rather
+	// than adding a duplicate.
+	w.state.UpdateEntry(dbID, map[string]interface{}{
+		"type":    "song",
+		"title":   title,
+		"artist":  artist,
+		"content": fmt.Sprintf("\"%s\" - %s", title, artist),
 	})
 }
 
 func (w *WailsUI) UpdateSongLine(title, artist string) {
-	if w.ctx == nil {
-		return
-	}
-	wailsRuntime.EventsEmit(w.ctx, "song-updated", map[string]interface{}{
-		"title":  title,
-		"artist": artist,
-	})
+	// This updates the most recent song entry in the UI.
+	// WHY not used currently: with AcoustID removed, song identification is
+	// done once in AppendSong. Keeping the method to satisfy the UI interface.
 }
 
 func (w *WailsUI) AppendMusic() {
-	if w.ctx == nil {
-		return
-	}
 	w.mu.Lock()
 	if w.musicMarkerShown {
 		w.mu.Unlock()
@@ -168,43 +144,32 @@ func (w *WailsUI) AppendMusic() {
 	w.musicMarkerShown = true
 	w.mu.Unlock()
 
-	wailsRuntime.EventsEmit(w.ctx, "music-detected", map[string]interface{}{})
+	w.state.AddEntry(UIEntry{
+		ID:        0, // no DB id yet for music markers
+		Timestamp: time.Now().Format(time.RFC3339),
+		Type:      "music_unknown",
+		Content:   "Song played",
+	})
 }
 
 func (w *WailsUI) ClearMusicMarker() {
-	if w.ctx == nil {
-		return
-	}
 	w.mu.Lock()
 	w.musicMarkerShown = false
 	w.mu.Unlock()
-	wailsRuntime.EventsEmit(w.ctx, "music-cleared", map[string]interface{}{})
 }
 
 func (w *WailsUI) UpdateStatus(connected bool, classification string) {
-	if w.ctx == nil {
-		return
-	}
-	wailsRuntime.EventsEmit(w.ctx, "status", map[string]interface{}{
-		"connected":      connected,
-		"classification": classification,
-	})
+	w.state.SetConnected(connected)
+	w.state.SetClassification(classification)
 }
 
 func (w *WailsUI) UpdateLatency(latency time.Duration) {
-	if w.ctx == nil {
-		return
-	}
-	wailsRuntime.EventsEmit(w.ctx, "latency", map[string]interface{}{
-		"ms": latency.Milliseconds(),
-	})
+	// Latency is informational only, not currently displayed in the new UI.
+	// Could add to AppState if needed later.
 }
 
 func (w *WailsUI) ShowGPUWarning(message string) {
-	if w.ctx == nil {
-		return
-	}
-	wailsRuntime.EventsEmit(w.ctx, "gpu-warning", message)
+	w.state.SetGPUWarning(message)
 }
 
 // Run blocks until Close() is called. The orchestrator's Start() method

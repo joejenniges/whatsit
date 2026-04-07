@@ -8,27 +8,16 @@
   import StatusBar from './StatusBar.svelte';
   import {
     getEntries, appendEntry, updateEntry, removeEntry, removeEntries,
-    insertAfter, setEntries, fromLogEntry, setupEntryEvents,
-    isSelected, getSelectedEntries, toggleSelect, clearSelection,
-    subscribe as entriesSub,
+    insertAfter, isSelected, getSelectedEntries, toggleSelect, clearSelection,
+    getSearchQuery, getFilterActive, getSearchRegex,
+    setSearchQuery, toggleFilter, clearSearch, matchesEntry,
+    getStatus, getStreaming, getListenEnabled,
+    setStreaming, setListenEnabled,
+    subscribe,
     type Entry,
-  } from '../stores/entries';
-  import {
-    getQuery, getFilterActive, getRegex,
-    setQuery, toggleFilter, clearSearch, matchesEntry,
-    subscribe as searchSub,
-  } from '../stores/search';
-  import {
-    getConnected, getClassification, getStreaming, getListenEnabled,
-    setStatus, setStreaming, setListenEnabled, setupStatusEvents,
-    subscribe as statusSub,
-  } from '../stores/status';
+  } from '../store';
 
-  // Reactive state driven by stores.
-  // WHY tick counter: Svelte 5's $state reactivity doesn't always detect
-  // reassignment from manual store callbacks. The tick forces a re-render
-  // by changing a value the template depends on (via $derived).
-  let tick = $state(0);
+  // Reactive state driven by the unified store.
   let entries: Entry[] = $state([]);
   let query = $state('');
   let filterActive = $state(false);
@@ -51,17 +40,17 @@
       : entries
   );
 
-  function syncFromStores() {
-    entries = [...getEntries()];  // new array reference to ensure Svelte detects the change
-    query = getQuery();
+  function syncFromStore() {
+    entries = [...getEntries()];
+    query = getSearchQuery();
     filterActive = getFilterActive();
-    regex = getRegex();
-    connected = getConnected();
-    classification = getClassification();
+    regex = getSearchRegex();
+    const status = getStatus();
+    connected = status.connected;
+    classification = status.classification;
     streaming = getStreaming();
     listenEnabled = getListenEnabled();
     selectedCount = getSelectedEntries().length;
-    tick++;
   }
 
   function scrollToBottom() {
@@ -90,10 +79,8 @@
   }
 
   // WHY: $effect for auto-scroll. When entries change and autoScroll is on,
-  // we need to scroll to bottom after the DOM updates. Using tick() would be
-  // ideal but requestAnimationFrame is simpler here and works reliably.
+  // we need to scroll to bottom after the DOM updates.
   $effect(() => {
-    // Touch entries.length to subscribe to changes
     const _len = entries.length;
     if (autoScroll && _len > 0) {
       requestAnimationFrame(scrollToBottom);
@@ -101,39 +88,25 @@
   });
 
   onMount(() => {
-    syncFromStores();
-    const unsubs = [
-      entriesSub(syncFromStores),
-      searchSub(syncFromStores),
-      statusSub(syncFromStores),
-    ];
-
-    loadHistory();
-    // Set up Wails event listeners at the store level (idempotent).
-    // WHY store-level: these are global Wails events. If registered in the
-    // component, tab switching (destroy/remount) would lose or duplicate them.
-    setupEntryEvents();
-    setupStatusEvents();
-
-    return () => {
-      for (const u of unsubs) u();
-    };
+    syncFromStore();
+    // Subscribe to the single unified store. No more separate event setup --
+    // store.init() (called in App.svelte) handles all Wails event registration.
+    return subscribe(syncFromStore);
   });
 
-  async function loadHistory() {
-    try {
-      const { GetRecentEntries } = await import('../../wailsjs/go/main/App');
-      const recent = await GetRecentEntries(200);
-      if (recent && recent.length > 0) {
-        // Recent comes newest-first, reverse to chronological
-        const mapped = recent.reverse().map(fromLogEntry);
-        setEntries(mapped);
-      }
-    } catch {
-      // Bindings not available
-    }
+  // Convert a Go LogEntry (from bindings) to our frontend Entry type.
+  function fromLogEntry(le: any): Entry {
+    return {
+      id: le.ID,
+      type: le.EntryType === 'song' ? 'song'
+        : le.EntryType === 'music_unknown' ? 'music_unknown'
+        : 'speech',
+      timestamp: new Date(le.Timestamp),
+      content: le.Content || '',
+      title: le.Title || '',
+      artist: le.Artist || '',
+    };
   }
-
 
   async function handleSongSave(id: number, title: string, artist: string) {
     updateEntry(id, { title, artist, type: 'song' });
@@ -240,23 +213,19 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    // Ctrl+A: select all visible entries
     if ((e.ctrlKey || e.metaKey) && e.key === 'a' && document.activeElement?.tagName !== 'INPUT') {
       e.preventDefault();
       for (const entry of visibleEntries) {
         toggleSelect(entry.id, false);
       }
     }
-    // Delete/Backspace: delete selected
     if ((e.key === 'Delete' || e.key === 'Backspace') && getSelectedEntries().length > 0 && document.activeElement?.tagName !== 'INPUT') {
       e.preventDefault();
       handleBulkDelete();
     }
-    // Ctrl+C: copy selected
     if ((e.ctrlKey || e.metaKey) && e.key === 'c' && getSelectedEntries().length > 0) {
       handleCopySelected();
     }
-    // Escape: clear selection
     if (e.key === 'Escape') {
       clearSelection();
     }
@@ -307,7 +276,7 @@
   <SearchBar
     {query}
     {filterActive}
-    onquery={setQuery}
+    onquery={setSearchQuery}
     ontogglefilter={toggleFilter}
     onclear={clearSearch}
     oninsertsong={handleInsertSong}

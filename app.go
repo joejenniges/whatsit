@@ -29,11 +29,15 @@ type App struct {
 	db           *storage.Database
 	orchestrator *app.Orchestrator
 	wailsUI      *WailsUI
+	state        *AppState
 }
 
 // NewApp creates a new App instance.
 func NewApp() *App {
-	return &App{}
+	state := NewAppState()
+	return &App{
+		state: state,
+	}
 }
 
 // startup is called when the Wails app starts. The context is saved so we
@@ -67,8 +71,9 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.db = db
 
-	// Create WailsUI adapter and set the runtime context.
-	a.wailsUI = NewWailsUI()
+	// Create WailsUI adapter with the shared AppState and set the runtime context.
+	a.state.SetContext(ctx)
+	a.wailsUI = NewWailsUI(a.state)
 	a.wailsUI.SetContext(ctx)
 
 	// Create orchestrator with the WailsUI adapter.
@@ -93,6 +98,15 @@ func (a *App) shutdown(ctx context.Context) {
 	// still be running and writing to the DB. Closing it here causes
 	// "sql: database is closed" errors. Let the orchestrator sequence it.
 	time.Sleep(1 * time.Second)
+}
+
+// --- State binding ---
+
+// GetInitialState returns a snapshot of all UI-relevant state.
+// Called ONCE when the frontend first loads to catch up on any state
+// that was set before the frontend was ready.
+func (a *App) GetInitialState() map[string]interface{} {
+	return a.state.Snapshot()
 }
 
 // --- Config bindings ---
