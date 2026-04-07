@@ -23,11 +23,17 @@ DLLS := libwhisper-1.dll ggml.dll ggml-base.dll ggml-cpu.dll ggml-vulkan.dll \
         libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll \
         onnxruntime.dll
 
+# Model files to bundle (CED-tiny for AI audio classification)
+MODELS := ced-tiny.onnx ced-tiny.onnx.data
+
 dist: build
 	mkdir -p $(DIST_DIR)
 	cp $(APP_NAME).exe $(DIST_DIR)/
 	@for dll in $(DLLS); do \
 		cp /c/msys64/ucrt64/bin/$$dll $(DIST_DIR)/ 2>/dev/null || echo "WARN: $$dll not found"; \
+	done
+	@for model in $(MODELS); do \
+		cp $$model $(DIST_DIR)/ 2>/dev/null || echo "WARN: $$model not found"; \
 	done
 	cd $(DIST_DIR) && zip -9 ../$(APP_NAME)-$(VERSION)-win64.zip *
 	@echo "Created $(APP_NAME)-$(VERSION)-win64.zip"
