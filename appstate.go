@@ -79,6 +79,18 @@ func (s *AppState) AddEntry(entry UIEntry) {
 	s.emit("entry:new", entry)
 }
 
+// AddEntrySilent adds an entry without emitting an event.
+// Used during startup to load DB history before the frontend is ready.
+// The frontend catches up via GetInitialState().
+func (s *AppState) AddEntrySilent(entry UIEntry) {
+	s.mu.Lock()
+	s.Entries = append(s.Entries, entry)
+	if len(s.Entries) > 200 {
+		s.Entries = s.Entries[len(s.Entries)-200:]
+	}
+	s.mu.Unlock()
+}
+
 func (s *AppState) UpdateEntry(id int64, updates map[string]interface{}) {
 	s.mu.Lock()
 	for i := range s.Entries {

@@ -71,6 +71,25 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.db = db
 
+	// Load recent entries from DB into AppState so the frontend has history on launch.
+	if recent, err := db.GetRecentEntries(200); err == nil && len(recent) > 0 {
+		// GetRecentEntries returns newest-first, reverse for chronological order.
+		for i, j := 0, len(recent)-1; i < j; i, j = i+1, j-1 {
+			recent[i], recent[j] = recent[j], recent[i]
+		}
+		for _, le := range recent {
+			a.state.AddEntrySilent(UIEntry{
+				ID:        le.ID,
+				Timestamp: le.Timestamp.Format(time.RFC3339),
+				Type:      le.EntryType,
+				Content:   le.Content,
+				Title:     le.Title,
+				Artist:    le.Artist,
+			})
+		}
+		log.Printf("app: loaded %d entries from DB into state", len(recent))
+	}
+
 	// Create WailsUI adapter with the shared AppState and set the runtime context.
 	a.state.SetContext(ctx)
 	a.wailsUI = NewWailsUI(a.state)
