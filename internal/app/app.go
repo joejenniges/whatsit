@@ -739,6 +739,17 @@ func (o *Orchestrator) flushSpeechBuffer() {
 		return
 	}
 
+	// WHY minimum 4 seconds: shorter segments produce garbage from whisper.
+	// During classifier bouncing, single 2-second chunks get flushed as
+	// "speech" but they're actually lyrics without music markers. Whisper
+	// hallucinates on these short clips. 4 seconds gives enough context.
+	minSamples := whisperSampleRate * 4
+	if len(samples) < minSamples {
+		log.Printf("app: discarding short speech segment: %d samples (%.1fs < 4s minimum)",
+			len(samples), float64(len(samples))/float64(whisperSampleRate))
+		return
+	}
+
 	audioDuration := float64(len(samples)) / float64(whisperSampleRate)
 	log.Printf("app: transcribing speech segment: %d samples (%.1fs)", len(samples), audioDuration)
 
