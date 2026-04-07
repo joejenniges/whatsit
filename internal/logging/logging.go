@@ -2,7 +2,6 @@ package logging
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -52,14 +51,17 @@ func Setup() (*SetupResult, error) {
 		return nil, fmt.Errorf("logging: open log file: %w", err)
 	}
 
-	// Redirect stderr to the log file BEFORE setting up log output.
-	// This captures Go runtime panics from any goroutine.
+	// Redirect stderr to the log file so Go runtime panics (which write
+	// directly to fd 2) are captured instead of vanishing with -H windowsgui.
 	if err := redirectStderr(f); err != nil {
 		// Non-fatal: we still get log.* output, just not raw panics.
 		fmt.Fprintf(f, "logging: redirect stderr failed: %v\n", err)
 	}
 
-	log.SetOutput(io.MultiWriter(f, os.Stderr))
+	// WHY just f, not MultiWriter(f, os.Stderr): stderr was just redirected
+	// to f above. Writing to both f and os.Stderr would duplicate every line
+	// since they now point to the same file.
+	log.SetOutput(f)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 
 	// Clean up old logs in the background so it doesn't slow startup.
