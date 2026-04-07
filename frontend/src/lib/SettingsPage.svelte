@@ -1,19 +1,50 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
+  // Current values
   let streamUrl = $state('');
   let asrEngine = $state('whisper');
   let modelSize = $state('base');
-  let classifierTier = $state('basic');
+  let classifierTier = $state('whisper');
   let transcriptionMode = $state('segment');
-  let useGpu = $state(false);
+  let useGpu = $state(true);
   let language = $state('en');
   let saveAudio = $state(false);
-  let windowSize = $state(5);
+  let windowSize = $state(10);
   let windowStep = $state(3);
   let classifierDebug = $state(false);
+
+  // Original values (from last save/load) for dirty detection
+  let original: Record<string, any> = {};
+
   let saving = $state(false);
   let saveMsg = $state('');
+  let shakeSave = $state(false);
+  let showRestartDialog = $state(false);
+
+  // Fields that require app restart to take effect
+  const restartFields = ['asrEngine', 'modelSize', 'classifierTier', 'transcriptionMode', 'useGpu'];
+
+  function currentValues(): Record<string, any> {
+    return { streamUrl, asrEngine, modelSize, classifierTier, transcriptionMode, useGpu, language, saveAudio, windowSize, windowStep, classifierDebug };
+  }
+
+  let dirty = $derived(JSON.stringify(currentValues()) !== JSON.stringify(original));
+
+  let needsRestart = $derived(() => {
+    for (const f of restartFields) {
+      if ((currentValues() as any)[f] !== original[f]) return true;
+    }
+    return false;
+  });
+
+  // Expose a method for App.svelte to call before switching tabs
+  export function canLeave(): boolean {
+    if (!dirty) return true;
+    shakeSave = true;
+    setTimeout(() => shakeSave = false, 600);
+    return false;
+  }
 
   onMount(async () => {
     try {
@@ -22,22 +53,24 @@
       streamUrl = cfg.StreamURL || '';
       asrEngine = cfg.ASREngine || 'whisper';
       modelSize = cfg.ModelSize || 'base';
-      classifierTier = cfg.ClassifierTier || 'basic';
+      classifierTier = cfg.ClassifierTier || 'whisper';
       transcriptionMode = cfg.TranscriptionMode || 'segment';
-      useGpu = cfg.UseGPU || false;
+      useGpu = cfg.UseGPU ?? true;
       language = cfg.Language || 'en';
       saveAudio = cfg.SaveAudio || false;
-      windowSize = cfg.WindowSizeSecs || 5;
+      windowSize = cfg.WindowSizeSecs || 10;
       windowStep = cfg.WindowStepSecs || 3;
       classifierDebug = cfg.ClassifierDebug || false;
+      original = currentValues();
     } catch {
-      // Bindings not available yet
+      original = currentValues();
     }
   });
 
   async function handleSave() {
     saving = true;
     saveMsg = '';
+    const restartNeeded = needsRestart();
     try {
       const { SaveConfig } = await import('../../wailsjs/go/main/App');
       await SaveConfig({
@@ -55,12 +88,26 @@
         SaveAudio: saveAudio,
         UseGPU: useGpu,
       });
-      saveMsg = 'Saved';
-      setTimeout(() => saveMsg = '', 2000);
+      original = currentValues();
+      if (restartNeeded) {
+        showRestartDialog = true;
+      } else {
+        saveMsg = 'Saved';
+        setTimeout(() => saveMsg = '', 2000);
+      }
     } catch (e) {
       saveMsg = `Error: ${e}`;
     } finally {
       saving = false;
+    }
+  }
+
+  async function handleRestart() {
+    try {
+      const { Quit } = await import('../../wailsjs/runtime/runtime');
+      Quit();
+    } catch {
+      showRestartDialog = false;
     }
   }
 
@@ -81,6 +128,18 @@
 
 <div class="settings">
   <h2>Settings</h2>
+
+  {#if showRestartDialog}
+    <div class="restart-overlay">
+      <div class="restart-dialog">
+        <p>Settings saved. Some changes require a restart to take effect.</p>
+        <div class="restart-actions">
+          <button class="restart-btn" onclick={handleRestart}>Quit Now</button>
+          <button class="later-btn" onclick={() => showRestartDialog = false}>Later</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <!-- Stream -->
   <section class="section">
@@ -174,9 +233,11 @@
   </section>
 
   <div class="form-actions">
-    <button class="save-btn" onclick={handleSave} disabled={saving}>
-      {saving ? 'Saving...' : 'Save'}
-    </button>
+    {#if dirty}
+      <button class="save-btn" class:shake={shakeSave} onclick={handleSave} disabled={saving}>
+        {saving ? 'Saving...' : 'Save Changes'}
+      </button>
+    {/if}
     <button class="folder-btn" onclick={openLogsFolder}>Open Logs</button>
     <button class="folder-btn" onclick={openDataFolder}>Open Data Folder</button>
     {#if saveMsg}
@@ -192,6 +253,7 @@
     margin: 0 auto;
     overflow-y: auto;
     height: 100%;
+    position: relative;
   }
   h2 {
     color: #e0e0e0;
@@ -303,6 +365,14 @@
     opacity: 0.5;
     cursor: default;
   }
+  .save-btn.shake {
+    animation: shake 0.5s ease-in-out;
+  }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    10%, 50%, 90% { transform: translateX(-4px); }
+    30%, 70% { transform: translateX(4px); }
+  }
   .folder-btn {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.15);
@@ -322,5 +392,61 @@
   }
   .save-msg.error {
     color: #ff5050;
+  }
+  .restart-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .restart-dialog {
+    background: #1e2a3a;
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    border-radius: 12px;
+    padding: 24px 32px;
+    max-width: 400px;
+    text-align: center;
+  }
+  .restart-dialog p {
+    color: #e0e0e0;
+    font-size: 14px;
+    line-height: 1.5;
+    margin: 0 0 20px 0;
+  }
+  .restart-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+  }
+  .restart-btn {
+    background: #4a9eff;
+    border: none;
+    border-radius: 6px;
+    color: white;
+    padding: 8px 24px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .restart-btn:hover {
+    background: #3a8eef;
+  }
+  .later-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    color: #ccc;
+    padding: 8px 24px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .later-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
   }
 </style>

@@ -10,6 +10,14 @@
   let currentTab: Tab = $state('live');
   let download = $state({ active: false, percent: 0, message: '' });
   let gpuWarning = $state('');
+  let settingsRef: SettingsPage | undefined = $state(undefined);
+
+  function switchTab(tab: Tab) {
+    if (currentTab === 'settings' && tab !== 'settings' && settingsRef) {
+      if (!settingsRef.canLeave()) return;
+    }
+    currentTab = tab;
+  }
 
   onMount(() => {
     init();
@@ -39,12 +47,12 @@
       <button
         class="tab"
         class:active={currentTab === 'live'}
-        onclick={() => currentTab = 'live'}
+        onclick={() => switchTab('live')}
       >Live</button>
       <button
         class="tab"
         class:active={currentTab === 'settings'}
-        onclick={() => currentTab = 'settings'}
+        onclick={() => switchTab('settings')}
       >Settings</button>
     </nav>
 
@@ -52,7 +60,7 @@
       {#if currentTab === 'live'}
         <LiveView />
       {:else}
-        <SettingsPage />
+        <SettingsPage bind:this={settingsRef} />
       {/if}
     </div>
   {/if}
