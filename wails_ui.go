@@ -20,8 +20,7 @@ type WailsUI struct {
 	state *AppState       // central state -- all mutations go through here
 	done  chan struct{}    // closed on shutdown to unblock Run()
 
-	mu               sync.Mutex
-	musicMarkerShown bool // dedup: only emit one music-detected per segment
+	mu sync.Mutex
 
 	// Callbacks set by the orchestrator via Set*Callback methods.
 	onStart    func()
@@ -112,11 +111,6 @@ func (w *WailsUI) AppendTranscription(timestamp time.Time, text string, dbID int
 }
 
 func (w *WailsUI) AppendSong(title, artist string, dbID int64) {
-	// Reset marker so the next music segment gets a fresh one.
-	w.mu.Lock()
-	w.musicMarkerShown = false
-	w.mu.Unlock()
-
 	// Update the existing music_unknown entry to a fully identified song.
 	// WHY UpdateEntry: when music starts, AppendMusic creates a music_unknown
 	// placeholder. Once identification succeeds, we update that entry rather
@@ -136,16 +130,11 @@ func (w *WailsUI) UpdateSongLine(title, artist string) {
 }
 
 func (w *WailsUI) AppendMusic() {
-	w.mu.Lock()
-	if w.musicMarkerShown {
-		w.mu.Unlock()
-		return
-	}
-	w.musicMarkerShown = true
-	w.mu.Unlock()
-
+	// WHY no dedup here: the orchestrator already has musicMarkerUp + 150s cooldown.
+	// A second dedup layer in WailsUI was preventing markers from reaching AppState
+	// because the flag never reset (ClearMusicMarker wasn't being called reliably).
 	w.state.AddEntry(UIEntry{
-		ID:        0, // no DB id yet for music markers
+		ID:        0,
 		Timestamp: time.Now().Format(time.RFC3339),
 		Type:      "music_unknown",
 		Content:   "Song played",
@@ -153,9 +142,7 @@ func (w *WailsUI) AppendMusic() {
 }
 
 func (w *WailsUI) ClearMusicMarker() {
-	w.mu.Lock()
-	w.musicMarkerShown = false
-	w.mu.Unlock()
+	// No-op: dedup is handled entirely by the orchestrator's musicMarkerUp flag.
 }
 
 func (w *WailsUI) UpdateStatus(connected bool, classification string) {
