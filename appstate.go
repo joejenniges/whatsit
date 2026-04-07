@@ -27,6 +27,14 @@ type AppState struct {
 	// CED inference time in milliseconds per chunk.
 	CEDLoadMs float64 `json:"cedLoadMs"`
 
+	// CED classification details (from last inference).
+	CEDSpeech  bool    `json:"cedSpeech"`
+	CEDMusic   bool    `json:"cedMusic"`
+	CEDSinging bool    `json:"cedSinging"`
+	CEDTop     string  `json:"cedTop"`
+	CEDTopScore float64 `json:"cedTopScore"`
+	CEDGenre   string  `json:"cedGenre"`
+
 	// Entries (last 200 for display)
 	Entries []UIEntry `json:"entries"`
 
@@ -93,6 +101,19 @@ func (s *AppState) SetWhisperLoad(load float64) {
 func (s *AppState) SetCEDLoad(ms float64) {
 	s.mu.Lock()
 	s.CEDLoadMs = ms
+	s.mu.Unlock()
+	// Don't emit here -- SetCEDInfo emits with the full details.
+}
+
+func (s *AppState) SetCEDInfo(speech, music, singing bool, topLabel string, topScore float64, genre string, loadMs float64) {
+	s.mu.Lock()
+	s.CEDSpeech = speech
+	s.CEDMusic = music
+	s.CEDSinging = singing
+	s.CEDTop = topLabel
+	s.CEDTopScore = topScore
+	s.CEDGenre = genre
+	s.CEDLoadMs = loadMs
 	s.mu.Unlock()
 	s.emitStatus()
 }
@@ -190,6 +211,12 @@ func (s *AppState) emitStatus() {
 		"classifierTier":  s.ClassifierTier,
 		"whisperLoad":     s.WhisperLoad,
 		"cedLoadMs":       s.CEDLoadMs,
+		"cedSpeech":       s.CEDSpeech,
+		"cedMusic":        s.CEDMusic,
+		"cedSinging":      s.CEDSinging,
+		"cedTop":          s.CEDTop,
+		"cedTopScore":     s.CEDTopScore,
+		"cedGenre":        s.CEDGenre,
 	}
 	s.mu.RUnlock()
 	s.emit("status:update", data)

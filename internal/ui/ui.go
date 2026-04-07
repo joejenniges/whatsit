@@ -189,7 +189,8 @@ func (a *App) UpdateLatency(latency time.Duration) {
 }
 
 func (a *App) UpdateWhisperLoad(load float64) {}
-func (a *App) UpdateCEDLoad(ms float64)       {}
+func (a *App) UpdateCEDInfo(speech, music, singing bool, topLabel string, topScore float64, genre string, loadMs float64) {
+}
 
 // ShowGPUWarning displays a warning banner in the live view about GPU status.
 // Safe to call from any goroutine.

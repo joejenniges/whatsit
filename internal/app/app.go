@@ -39,7 +39,7 @@ type UI interface {
 	UpdateStatus(connected bool, classification string)
 	UpdateLatency(latency time.Duration)
 	UpdateWhisperLoad(load float64)
-	UpdateCEDLoad(ms float64)
+	UpdateCEDInfo(speech, music, singing bool, topLabel string, topScore float64, genre string, loadMs float64)
 	ShowGPUWarning(message string)
 	Run()
 }
@@ -631,9 +631,12 @@ func (o *Orchestrator) processingLoop() {
 		// Show raw classification in the UI for responsiveness.
 		o.ui.UpdateStatus(true, string(result.Raw))
 
-		// Report CED inference time if using fusion classifier.
+		// Report CED details if using fusion classifier.
 		if fc, ok := o.classifier.(*classifier.FusionClassifier); ok {
-			o.ui.UpdateCEDLoad(fc.LastInferenceMs)
+			if ced := fc.GetLastCEDResult(); ced != nil {
+				o.ui.UpdateCEDInfo(ced.IsSpeech, ced.IsMusic, ced.IsSinging,
+					ced.TopLabel, ced.TopScore, ced.Genre, fc.LastInferenceMs)
+			}
 		}
 	}
 

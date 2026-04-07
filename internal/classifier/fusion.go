@@ -256,6 +256,11 @@ func (f *FusionClassifier) Name() string {
 	return "ced-tiny+rhythm"
 }
 
+// GetLastCEDResult returns the full CED result from the last classification.
+func (f *FusionClassifier) GetLastCEDResult() *CEDResult {
+	return f.lastCEDResult
+}
+
 // GetLastGenre returns the genre from the last classification.
 // Useful for the UI and database logging.
 func (f *FusionClassifier) GetLastGenre() (string, float64) {

@@ -164,8 +164,8 @@ func (w *WailsUI) UpdateWhisperLoad(load float64) {
 	w.state.SetWhisperLoad(load)
 }
 
-func (w *WailsUI) UpdateCEDLoad(ms float64) {
-	w.state.SetCEDLoad(ms)
+func (w *WailsUI) UpdateCEDInfo(speech, music, singing bool, topLabel string, topScore float64, genre string, loadMs float64) {
+	w.state.SetCEDInfo(speech, music, singing, topLabel, topScore, genre, loadMs)
 }
 
 func (w *WailsUI) ShowGPUWarning(message string) {

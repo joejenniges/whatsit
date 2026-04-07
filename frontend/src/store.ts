@@ -11,8 +11,14 @@ export interface Status {
   connected: boolean;
   classification: string;
   classifierTier: string;
-  whisperLoad: number;  // 0-1+ ratio of processing time to audio duration
-  cedLoadMs: number;    // CED inference time in milliseconds
+  whisperLoad: number;
+  cedLoadMs: number;
+  cedSpeech: boolean;
+  cedMusic: boolean;
+  cedSinging: boolean;
+  cedTop: string;
+  cedTopScore: number;
+  cedGenre: string;
 }
 
 export interface Download {
@@ -32,7 +38,7 @@ export interface Entry {
 }
 
 // State
-let _status: Status = { connected: false, classification: '--', classifierTier: '', whisperLoad: 0, cedLoadMs: 0 };
+let _status: Status = { connected: false, classification: '--', classifierTier: '', whisperLoad: 0, cedLoadMs: 0, cedSpeech: false, cedMusic: false, cedSinging: false, cedTop: '', cedTopScore: 0, cedGenre: '' };
 let _entries: Entry[] = [];
 let _download: Download = { active: false, percent: 0, message: '' };
 let _gpuWarning = '';
@@ -206,6 +212,12 @@ export async function init() {
         classifierTier: data.classifierTier || _status.classifierTier,
         whisperLoad: data.whisperLoad ?? _status.whisperLoad,
         cedLoadMs: data.cedLoadMs ?? _status.cedLoadMs,
+        cedSpeech: data.cedSpeech ?? _status.cedSpeech,
+        cedMusic: data.cedMusic ?? _status.cedMusic,
+        cedSinging: data.cedSinging ?? _status.cedSinging,
+        cedTop: data.cedTop ?? _status.cedTop,
+        cedTopScore: data.cedTopScore ?? _status.cedTopScore,
+        cedGenre: data.cedGenre ?? _status.cedGenre,
       };
       _streaming = data.connected;
       notify();

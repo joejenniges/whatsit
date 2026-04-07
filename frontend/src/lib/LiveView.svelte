@@ -27,6 +27,12 @@
   let classifierTier = $state('');
   let whisperLoad = $state(0);
   let cedLoadMs = $state(0);
+  let cedSpeech = $state(false);
+  let cedMusic = $state(false);
+  let cedSinging = $state(false);
+  let cedTop = $state('');
+  let cedTopScore = $state(0);
+  let cedGenre = $state('');
   let streaming = $state(false);
   let listenEnabled = $state(false);
   let selectedCount = $state(0);
@@ -54,6 +60,12 @@
     classifierTier = status.classifierTier;
     whisperLoad = status.whisperLoad;
     cedLoadMs = status.cedLoadMs;
+    cedSpeech = status.cedSpeech;
+    cedMusic = status.cedMusic;
+    cedSinging = status.cedSinging;
+    cedTop = status.cedTop;
+    cedTopScore = status.cedTopScore;
+    cedGenre = status.cedGenre;
     streaming = getStreaming();
     listenEnabled = getListenEnabled();
     selectedCount = getSelectedEntries().length;
@@ -341,6 +353,12 @@
     {classifierTier}
     {whisperLoad}
     {cedLoadMs}
+    {cedSpeech}
+    {cedMusic}
+    {cedSinging}
+    {cedTop}
+    {cedTopScore}
+    {cedGenre}
     {streaming}
     {listenEnabled}
     onstart={handleStart}
