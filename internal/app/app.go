@@ -749,9 +749,15 @@ func (o *Orchestrator) processChunkAs(class classifier.Classification, chunk []f
 		} else {
 			// Segment mode (default): accumulate speech audio, transcribe
 			// once when the segment ends (transition to music/silence).
-			// WHY: produces cleaner text than rolling window -- no duplicates,
-			// no carryover from overlapping windows, no diffText artifacts.
 			o.speechBuffer.Write(chunk)
+
+			// WHY max segment: if the classifier never transitions (e.g., scheirer
+			// classifies everything as speech including music), the buffer grows
+			// forever and nothing gets transcribed. Flush every 30 seconds to
+			// ensure text appears in the UI.
+			if o.speechBuffer.Duration(whisperSampleRate) >= 30*time.Second {
+				o.flushSpeechBuffer()
+			}
 		}
 
 	case classifier.ClassMusic:

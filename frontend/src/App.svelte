@@ -5,10 +5,10 @@
   import DownloadScreen from './lib/DownloadScreen.svelte';
   import GpuWarning from './lib/GpuWarning.svelte';
 
-  type View = 'main' | 'download';
+  type View = 'loading' | 'main' | 'download';
   type Tab = 'live' | 'settings';
 
-  let currentView: View = $state('main');
+  let currentView: View = $state('loading');
   let currentTab: Tab = $state('live');
   let gpuWarning = $state('');
   let downloadModelSize = $state('');
@@ -21,22 +21,15 @@
 
   onMount(() => {
     setupEvents();
-    checkModelStatus();
+    // WHY no checkModelStatus here: the orchestrator handles the download
+    // flow and emits show-main or show-download. Calling GetModelStatus
+    // raced with startup() and showed the download screen even when models
+    // existed. The frontend starts in "loading" and waits for the event.
+    // Safety timeout: if no event arrives in 5s, assume main view.
+    setTimeout(() => {
+      if (currentView === 'loading') currentView = 'main';
+    }, 5000);
   });
-
-  async function checkModelStatus() {
-    try {
-      const { GetModelStatus, GetConfig } = await import('../wailsjs/go/main/App');
-      const cfg = await GetConfig();
-      const status = await GetModelStatus();
-      if (!status.Exists) {
-        currentView = 'download';
-        downloadModelSize = cfg.ASREngine === 'parakeet' ? 'parakeet-ctc-0.6b' : (cfg.ModelSize || 'base');
-      }
-    } catch {
-      // Bindings not available
-    }
-  }
 
   async function setupEvents() {
     try {
@@ -71,7 +64,9 @@
     <GpuWarning message={gpuWarning} />
   {/if}
 
-  {#if currentView === 'download'}
+  {#if currentView === 'loading'}
+    <div class="loading">Starting...</div>
+  {:else if currentView === 'download'}
     <div class="view-container">
       <DownloadScreen
         modelSize={downloadModelSize}
@@ -134,6 +129,14 @@
   .tab.active {
     color: #4a9eff;
     border-bottom-color: #4a9eff;
+  }
+  .loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    color: #666;
+    font-size: 14px;
   }
   .view-container {
     flex: 1;
