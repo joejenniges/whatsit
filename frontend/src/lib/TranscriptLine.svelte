@@ -1,7 +1,7 @@
 <script lang="ts">
   import { splitAtMatches, type TextSegment } from '../utils/highlight';
 
-  let { id, timestamp, content, regex, ondelete, onedit, selected, ontoggleselect }: {
+  let { id, timestamp, content, regex, ondelete, onedit, selected, ontoggleselect, fresh = false }: {
     id: number;
     timestamp: Date;
     content: string;
@@ -10,6 +10,7 @@
     onedit: (id: number, content: string) => void;
     selected: boolean;
     ontoggleselect: (id: number, shiftKey: boolean) => void;
+    fresh?: boolean;
   } = $props();
 
   let timeStr = $derived(
@@ -60,6 +61,7 @@
 <div
   class="entry speech"
   class:selected
+  class:fresh
   onclick={handleClick}
   role="listitem"
 >
@@ -103,6 +105,13 @@
   }
   .speech {
     background: rgba(255, 255, 255, 0.03);
+  }
+  .speech.fresh {
+    animation: highlight-new 3s ease-out;
+  }
+  @keyframes highlight-new {
+    0% { background: rgba(74, 158, 255, 0.2); }
+    100% { background: rgba(255, 255, 255, 0.03); }
   }
   .speech.selected {
     background: rgba(74, 158, 255, 0.15);

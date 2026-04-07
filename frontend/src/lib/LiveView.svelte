@@ -142,6 +142,7 @@
           content: data.text,
           title: '',
           artist: '',
+          fresh: true,
         });
       });
 
@@ -364,6 +365,7 @@
           content={entry.content}
           {regex}
           selected={isSelected(entry.id)}
+          fresh={entry.fresh}
           ontoggleselect={handleToggleSelect}
           ondelete={() => handleDelete(entry.id)}
           onedit={handleEditContent}

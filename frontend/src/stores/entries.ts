@@ -10,6 +10,7 @@ export interface Entry {
   content: string;
   title: string;
   artist: string;
+  fresh?: boolean;  // true for entries added in real-time (not loaded from DB)
 }
 
 // WHY: Module-level state with getter/setter functions rather than a class.

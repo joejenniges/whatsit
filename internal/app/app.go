@@ -751,11 +751,12 @@ func (o *Orchestrator) processChunkAs(class classifier.Classification, chunk []f
 			// once when the segment ends (transition to music/silence).
 			o.speechBuffer.Write(chunk)
 
-			// WHY max segment: if the classifier never transitions (e.g., scheirer
-			// classifies everything as speech including music), the buffer grows
-			// forever and nothing gets transcribed. Flush every 30 seconds to
-			// ensure text appears in the UI.
-			if o.speechBuffer.Duration(whisperSampleRate) >= 30*time.Second {
+			// WHY 10-second flush: For trivia, the announcer reads a question
+			// during speech segments. Shorter flush intervals mean questions
+			// appear faster and are more isolated in the transcript. 10 seconds
+			// gives whisper enough context for accuracy while keeping latency low.
+			// Also handles the case where the classifier never transitions.
+			if o.speechBuffer.Duration(whisperSampleRate) >= 10*time.Second {
 				o.flushSpeechBuffer()
 			}
 		}
