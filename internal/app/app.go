@@ -526,13 +526,24 @@ func (o *Orchestrator) processingLoop() {
 	var pending []pendingChunk
 	var silenceSamples int
 
+	// WHY warmup: The rhythm accumulator needs ~4 seconds of onset data before
+	// it produces reliable results, and the whisper classifier's first inference
+	// runs on incomplete audio. During warmup, we classify chunks (feeding the
+	// rhythm accumulator) but don't act on the results -- no transcription,
+	// no song markers, no state transitions.
+	warmupChunks := 5 // ~10 seconds at 2s per chunk
+	chunksProcessed := 0
+
 	for chunk := range o.resampler.Output() {
-		// WHY normalize for classification but not transcription: The classifier
-		// thresholds are amplitude-dependent -- a quiet station vs a loud one
-		// produces different feature values, causing misclassification. Whisper
-		// handles varying volume fine (it normalizes internally).
 		normalized := audio.NormalizeRMS(chunk, 0.1)
 		result := o.classifier.Classify(normalized)
+
+		// During warmup, feed the classifiers but don't act on results.
+		if chunksProcessed < warmupChunks {
+			chunksProcessed++
+			o.ui.UpdateStatus(true, "warming up")
+			continue
+		}
 
 		if result.Debounced != currentState && currentState != "" {
 			// State transition confirmed by debounce.
