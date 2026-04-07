@@ -18,7 +18,7 @@
 
 <div class="download-screen">
   <div class="download-card">
-    <h2>Downloading Whisper Model</h2>
+    <h2>Downloading Models</h2>
     <p class="model-info">{modelSize || 'base'} model</p>
 
     <div class="progress-container">

@@ -27,6 +27,9 @@ export function subscribe(fn: () => void): () => void {
 export function setStatus(connected: boolean, classification: string) {
   _connected = connected;
   _classification = classification || '--';
+  // Derive streaming state from the Go backend's connected status.
+  // This is the source of truth -- if the backend says connected, we're streaming.
+  _streaming = connected;
   notify();
 }
 
