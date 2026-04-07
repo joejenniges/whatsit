@@ -92,7 +92,7 @@
     <h3>Speech Recognition</h3>
     <div class="form-row">
       <div class="form-group">
-        <label for="asr-engine">ASR Engine</label>
+        <label for="asr-engine">ASR Engine (requires restart)</label>
         <select id="asr-engine" bind:value={asrEngine}>
           <option value="whisper">Whisper (whisper.cpp)</option>
           <option value="parakeet">Parakeet CTC (ONNX)</option>
@@ -109,7 +109,7 @@
       </div>
     </div>
     <div class="form-group">
-      <label for="transcription-mode">Transcription Mode</label>
+      <label for="transcription-mode">Transcription Mode (requires restart)</label>
       <select id="transcription-mode" bind:value={transcriptionMode}>
         <option value="segment">Segment -- transcribe on transition (cleaner text)</option>
         <option value="rolling">Rolling -- progressive output (lower latency)</option>
@@ -125,12 +125,12 @@
   <section class="section">
     <h3>Audio Classification</h3>
     <div class="form-group">
-      <label for="classifier-tier">Classifier Tier</label>
+      <label for="classifier-tier">Classifier Tier (requires restart)</label>
       <select id="classifier-tier" bind:value={classifierTier}>
         <option value="basic">Basic (ZCR + spectral flatness)</option>
-        <option value="scheirer">Scheirer (4-feature, recommended)</option>
+        <option value="scheirer">Scheirer (4-feature)</option>
         <option value="mfcc">MFCC (cepstral analysis)</option>
-        <option value="whisper">Whisper (uses ASR for classification)</option>
+        <option value="whisper">Whisper (recommended, uses ASR)</option>
       </select>
     </div>
     <label class="check-label">
