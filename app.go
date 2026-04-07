@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -212,6 +213,26 @@ func (a *App) DeleteEntry(id int64) error {
 		return fmt.Errorf("database not initialized")
 	}
 	return a.db.DeleteEntry(id)
+}
+
+// OpenLogsFolder opens the logs directory in the OS file manager.
+func (a *App) OpenLogsFolder() error {
+	appDir, err := config.AppDir()
+	if err != nil {
+		return err
+	}
+	logsDir := filepath.Join(appDir, "logs")
+	os.MkdirAll(logsDir, 0o755)
+	return exec.Command("explorer", logsDir).Start()
+}
+
+// OpenDataFolder opens the app data directory in the OS file manager.
+func (a *App) OpenDataFolder() error {
+	appDir, err := config.AppDir()
+	if err != nil {
+		return err
+	}
+	return exec.Command("explorer", appDir).Start()
 }
 
 // --- Streaming control bindings ---

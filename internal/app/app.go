@@ -657,20 +657,17 @@ func (o *Orchestrator) processChunkAs(class classifier.Classification, chunk []f
 			log.Printf("app: start speech segment: %v", err)
 		}
 
-		// Whisper classifier already has the text from classification.
+		// WHY: Even with the whisper classifier (which produces text during
+		// classification), we still accumulate audio in the speech buffer and
+		// transcribe in 10-second segments. The whisper classifier's 4-second
+		// fragments are too short for coherent text -- they cut mid-sentence
+		// and produce garbage like "on the 40 degrees high and."
+		// Discard the classifier's text; use the segment buffer for clean output.
 		if wc, ok := o.classifier.(*classifier.WhisperClassifier); ok {
-			if text := wc.ConsumeText(); text != "" {
-				now := time.Now()
-				entry := &storage.LogEntry{
-					Timestamp: now,
-					EntryType: "speech",
-					Content:   text,
-					AudioPath: o.recorder.CurrentPath(),
-				}
-				if dbErr := o.db.InsertEntry(entry); dbErr != nil {
-					log.Printf("app: insert speech entry: %v", dbErr)
-				}
-				o.ui.AppendTranscription(now, text, entry.ID)
+			wc.ConsumeText() // discard -- we'll retranscribe from the buffer
+			o.speechBuffer.Write(chunk)
+			if o.speechBuffer.Duration(whisperSampleRate) >= 10*time.Second {
+				o.flushSpeechBuffer()
 			}
 		} else if o.config.TranscriptionMode == "rolling" {
 			// Rolling mode: feed to rolling window, get progressive output.

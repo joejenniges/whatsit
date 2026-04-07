@@ -13,9 +13,16 @@
     fresh?: boolean;
   } = $props();
 
-  let timeStr = $derived(
-    timestamp.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  );
+  let timeStr = $derived(formatTimestamp(timestamp));
+
+  function formatTimestamp(d: Date): string {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const mon = months[d.getMonth()];
+    const day = d.getDate();
+    const yr = String(d.getFullYear()).slice(-2);
+    const time = d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return `${mon} ${day} ${yr}, ${time}`;
+  }
 
   let segments: TextSegment[] = $derived(splitAtMatches(content, regex));
   let confirmDelete = $state(false);

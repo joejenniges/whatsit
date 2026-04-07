@@ -63,6 +63,20 @@
       saving = false;
     }
   }
+
+  async function openLogsFolder() {
+    try {
+      const { OpenLogsFolder } = await import('../../wailsjs/go/main/App');
+      await OpenLogsFolder();
+    } catch { /* ignore */ }
+  }
+
+  async function openDataFolder() {
+    try {
+      const { OpenDataFolder } = await import('../../wailsjs/go/main/App');
+      await OpenDataFolder();
+    } catch { /* ignore */ }
+  }
 </script>
 
 <div class="settings">
@@ -163,6 +177,8 @@
     <button class="save-btn" onclick={handleSave} disabled={saving}>
       {saving ? 'Saving...' : 'Save'}
     </button>
+    <button class="folder-btn" onclick={openLogsFolder}>Open Logs</button>
+    <button class="folder-btn" onclick={openDataFolder}>Open Data Folder</button>
     {#if saveMsg}
       <span class="save-msg" class:error={saveMsg.startsWith('Error')}>{saveMsg}</span>
     {/if}
@@ -286,6 +302,19 @@
   .save-btn:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+  .folder-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    color: #ccc;
+    padding: 9px 16px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .folder-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
   }
   .save-msg {
     font-size: 12px;
