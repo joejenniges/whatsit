@@ -158,6 +158,12 @@ func (a *App) AppendMusic() {
 	}
 }
 
+func (a *App) AppendMusicWithID(dbID int64) {
+	if a.liveView != nil {
+		a.liveView.AppendMusic()
+	}
+}
+
 // ClearMusicMarker resets the music segment tracker in the live view.
 // Safe to call from any goroutine.
 func (a *App) ClearMusicMarker() {

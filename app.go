@@ -53,6 +53,12 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
+	// Restore window position from saved state.
+	ws := LoadWindowState()
+	if ws.X >= 0 && ws.Y >= 0 {
+		wailsRuntime.WindowSetPosition(ctx, ws.X, ws.Y)
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Printf("Failed to load config: %v", err)
@@ -110,26 +116,33 @@ func (a *App) startup(ctx context.Context) {
 	// Start the orchestrator in a goroutine. It will call WailsUI.Run()
 	// which blocks until Close() is called from shutdown().
 	go a.orchestrator.Start()
+
+	// Periodically save window state. Can't do it in OnShutdown because
+	// WindowGetPosition/Size panics (divide by zero) when the window is
+	// already being destroyed.
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				func() {
+					defer func() { recover() }() // silently ignore panics
+					x, y := wailsRuntime.WindowGetPosition(a.ctx)
+					w, h := wailsRuntime.WindowGetSize(a.ctx)
+					if w > 0 && h > 0 {
+						SaveWindowState(WindowState{X: x, Y: y, Width: w, Height: h})
+					}
+				}()
+			}
+		}
+	}()
 }
 
 // shutdown is called when the Wails app is closing.
 func (a *App) shutdown(ctx context.Context) {
-	// Save window position/size for next launch.
-	// WHY recover: WindowGetPosition/Size may panic during shutdown
-	// if the window is already being destroyed.
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("save window state: recovered from panic: %v", r)
-			}
-		}()
-		x, y := wailsRuntime.WindowGetPosition(a.ctx)
-		w, h := wailsRuntime.WindowGetSize(a.ctx)
-		if w > 0 && h > 0 {
-			SaveWindowState(WindowState{X: x, Y: y, Width: w, Height: h})
-			log.Printf("app: saved window state: %dx%d at (%d,%d)", w, h, x, y)
-		}
-	}()
+	// Window state is saved periodically (every 10s) from a goroutine.
+	// Can't save here because WindowGetPosition/Size panics during shutdown.
 
 	// Unblock the orchestrator's Start() -> UI.Run() -> <-done channel.
 	if a.wailsUI != nil {

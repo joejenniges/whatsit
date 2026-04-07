@@ -34,6 +34,7 @@ type UI interface {
 	AppendSong(title, artist string, dbID int64)
 	UpdateSongLine(title, artist string)
 	AppendMusic()
+	AppendMusicWithID(dbID int64)
 	ClearMusicMarker()
 	UpdateStatus(connected bool, classification string)
 	UpdateLatency(latency time.Duration)
@@ -634,11 +635,12 @@ func (o *Orchestrator) handleTransition(from, to classifier.Classification) {
 			entry := &storage.LogEntry{
 				Timestamp: time.Now(),
 				EntryType: "music_unknown",
+				Content:   "Song played",
 			}
 			if dbErr := o.db.InsertEntry(entry); dbErr != nil {
 				log.Printf("app: insert music entry: %v", dbErr)
 			}
-			o.ui.AppendMusic()
+			o.ui.AppendMusicWithID(entry.ID)
 			o.musicMarkerUp = true
 			o.musicDBLogged = true
 			o.lastMusicMarker = time.Now()

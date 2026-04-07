@@ -130,11 +130,17 @@ func (w *WailsUI) UpdateSongLine(title, artist string) {
 }
 
 func (w *WailsUI) AppendMusic() {
-	// WHY no dedup here: the orchestrator already has musicMarkerUp + 150s cooldown.
-	// A second dedup layer in WailsUI was preventing markers from reaching AppState
-	// because the flag never reset (ClearMusicMarker wasn't being called reliably).
 	w.state.AddEntry(UIEntry{
 		ID:        0,
+		Timestamp: time.Now().Format(time.RFC3339),
+		Type:      "music_unknown",
+		Content:   "Song played",
+	})
+}
+
+func (w *WailsUI) AppendMusicWithID(dbID int64) {
+	w.state.AddEntry(UIEntry{
+		ID:        dbID,
 		Timestamp: time.Now().Format(time.RFC3339),
 		Type:      "music_unknown",
 		Content:   "Song played",
