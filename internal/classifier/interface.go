@@ -56,7 +56,15 @@ func NewClassifier(tier string, sampleRate int, debug bool) AudioClassifier {
 		c := NewMFCCClassifier(sampleRate)
 		c.Debug = debug
 		return c
-	case "whisper":
+	case "scheirer+rhythm":
+		inner := NewScheirerClassifier(sampleRate)
+		inner.Debug = debug
+		return NewEnhancedClassifier(inner, sampleRate, debug)
+	case "mfcc+rhythm":
+		inner := NewMFCCClassifier(sampleRate)
+		inner.Debug = debug
+		return NewEnhancedClassifier(inner, sampleRate, debug)
+	case "whisper", "whisper+rhythm":
 		// WHY nil: Whisper classifier needs a WhisperClassifyFunc callback
 		// that wraps the transcriber. The orchestrator creates it directly
 		// via NewWhisperClassifier and injects the callback.

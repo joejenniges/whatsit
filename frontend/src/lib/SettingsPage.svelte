@@ -203,7 +203,10 @@
         <option value="basic">Basic (ZCR + spectral flatness)</option>
         <option value="scheirer">Scheirer (4-feature)</option>
         <option value="mfcc">MFCC (cepstral analysis)</option>
-        <option value="whisper">Whisper (recommended, uses ASR)</option>
+        <option value="whisper">Whisper (uses ASR)</option>
+        <option value="whisper+rhythm">Whisper + Rhythm (recommended)</option>
+        <option value="scheirer+rhythm">Scheirer + Rhythm</option>
+        <option value="mfcc+rhythm">MFCC + Rhythm</option>
       </select>
     </div>
     <label class="check-label">

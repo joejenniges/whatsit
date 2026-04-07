@@ -227,16 +227,20 @@ func (o *Orchestrator) finishInit(modelPath string) {
 
 	tier := o.config.ClassifierTier
 	if tier == "" {
-		tier = "scheirer"
+		tier = "whisper"
 	}
-	if tier == "whisper" {
+	if tier == "whisper" || tier == "whisper+rhythm" {
 		// WHY callback: The classifier package can't import the transcriber
 		// package (circular dep), so we inject whisper via a callback.
 		wc := classifier.NewWhisperClassifier(func(samples []float32) (string, float32, error) {
 			return o.transcriber.ClassifyChunk(samples)
 		})
 		wc.Debug = o.config.ClassifierDebug
-		o.classifier = wc
+		if tier == "whisper+rhythm" {
+			o.classifier = classifier.NewEnhancedClassifier(wc, whisperSampleRate, o.config.ClassifierDebug)
+		} else {
+			o.classifier = wc
+		}
 	} else {
 		o.classifier = classifier.NewClassifier(tier, whisperSampleRate, o.config.ClassifierDebug)
 	}
@@ -323,14 +327,18 @@ func (o *Orchestrator) finishInitParakeet(modelPath, vocabPath string) {
 
 	tier := o.config.ClassifierTier
 	if tier == "" {
-		tier = "scheirer"
+		tier = "whisper"
 	}
-	if tier == "whisper" {
+	if tier == "whisper" || tier == "whisper+rhythm" {
 		wc := classifier.NewWhisperClassifier(func(samples []float32) (string, float32, error) {
 			return o.transcriber.ClassifyChunk(samples)
 		})
 		wc.Debug = o.config.ClassifierDebug
-		o.classifier = wc
+		if tier == "whisper+rhythm" {
+			o.classifier = classifier.NewEnhancedClassifier(wc, whisperSampleRate, o.config.ClassifierDebug)
+		} else {
+			o.classifier = wc
+		}
 	} else {
 		o.classifier = classifier.NewClassifier(tier, whisperSampleRate, o.config.ClassifierDebug)
 	}
