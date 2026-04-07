@@ -6,3 +6,13 @@ build/
 frontend/node_modules/
 frontend/dist/
 frontend/wailsjs/
+
+# Documentation/planning files stay local, not in git
+# Only README.md is tracked
+PLAN.md
+WEBUI-PLAN.md
+ced.md
+rhythm-detector.md
+wails.md
+testdata/README.md
+frontend/README.md
