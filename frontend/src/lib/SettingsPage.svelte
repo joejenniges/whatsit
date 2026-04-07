@@ -14,8 +14,9 @@
   let windowStep = $state(3);
   let classifierDebug = $state(false);
 
-  // Original values (from last save/load) for dirty detection
-  let original: Record<string, any> = {};
+  // Original values (from last save/load) for dirty detection.
+  // Must be $state so $derived tracks changes to it.
+  let original: Record<string, any> = $state({});
 
   let saving = $state(false);
   let saveMsg = $state('');
@@ -31,12 +32,13 @@
 
   let dirty = $derived(JSON.stringify(currentValues()) !== JSON.stringify(original));
 
-  let needsRestart = $derived(() => {
+  function needsRestart(): boolean {
+    const curr = currentValues();
     for (const f of restartFields) {
-      if ((currentValues() as any)[f] !== original[f]) return true;
+      if (curr[f] !== original[f]) return true;
     }
     return false;
-  });
+  }
 
   // Expose a method for App.svelte to call before switching tabs
   export function canLeave(): boolean {
