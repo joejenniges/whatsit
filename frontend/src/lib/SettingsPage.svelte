@@ -207,6 +207,7 @@
         <option value="mfcc">MFCC (cepstral analysis)</option>
         <option value="whisper">Whisper (uses ASR)</option>
         <option value="whisper+rhythm">Whisper + Rhythm (recommended)</option>
+        <option value="fusion">CED + Rhythm (AI classifier)</option>
         <option value="scheirer+rhythm">Scheirer + Rhythm</option>
         <option value="mfcc+rhythm">MFCC + Rhythm</option>
       </select>

@@ -232,6 +232,19 @@ func (o *Orchestrator) finishInit(modelPath string) {
 	if tier == "" {
 		tier = "whisper"
 	}
+	if tier == "fusion" {
+		// WHY: CED-tiny ONNX model for AI-based classification + genre detection.
+		// Falls back to whisper+rhythm if the CED model isn't available yet.
+		modelsDir := filepath.Join(appDir, "models")
+		cedPath := filepath.Join(modelsDir, "ced-tiny.onnx")
+		fc, fusionErr := classifier.NewFusionClassifier(cedPath, whisperSampleRate, o.config.ClassifierDebug)
+		if fusionErr != nil {
+			log.Printf("app: fusion classifier failed (%v), falling back to whisper+rhythm", fusionErr)
+			tier = "whisper+rhythm"
+		} else {
+			o.classifier = fc
+		}
+	}
 	if tier == "whisper" || tier == "whisper+rhythm" {
 		// WHY callback: The classifier package can't import the transcriber
 		// package (circular dep), so we inject whisper via a callback.
@@ -244,7 +257,7 @@ func (o *Orchestrator) finishInit(modelPath string) {
 		} else {
 			o.classifier = wc
 		}
-	} else {
+	} else if o.classifier == nil {
 		o.classifier = classifier.NewClassifier(tier, whisperSampleRate, o.config.ClassifierDebug)
 	}
 	log.Printf("app: classifier tier: %s (%s)", tier, o.classifier.Name())
@@ -332,6 +345,17 @@ func (o *Orchestrator) finishInitParakeet(modelPath, vocabPath string) {
 	if tier == "" {
 		tier = "whisper"
 	}
+	if tier == "fusion" {
+		modelsDir := filepath.Join(appDir, "models")
+		cedPath := filepath.Join(modelsDir, "ced-tiny.onnx")
+		fc, fusionErr := classifier.NewFusionClassifier(cedPath, whisperSampleRate, o.config.ClassifierDebug)
+		if fusionErr != nil {
+			log.Printf("app: fusion classifier failed (%v), falling back to whisper+rhythm", fusionErr)
+			tier = "whisper+rhythm"
+		} else {
+			o.classifier = fc
+		}
+	}
 	if tier == "whisper" || tier == "whisper+rhythm" {
 		wc := classifier.NewWhisperClassifier(func(samples []float32) (string, float32, error) {
 			return o.transcriber.ClassifyChunk(samples)
@@ -342,7 +366,7 @@ func (o *Orchestrator) finishInitParakeet(modelPath, vocabPath string) {
 		} else {
 			o.classifier = wc
 		}
-	} else {
+	} else if o.classifier == nil {
 		o.classifier = classifier.NewClassifier(tier, whisperSampleRate, o.config.ClassifierDebug)
 	}
 	log.Printf("app: classifier tier: %s (%s)", tier, o.classifier.Name())

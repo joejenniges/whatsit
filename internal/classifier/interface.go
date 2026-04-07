@@ -64,6 +64,11 @@ func NewClassifier(tier string, sampleRate int, debug bool) AudioClassifier {
 		inner := NewMFCCClassifier(sampleRate)
 		inner.Debug = debug
 		return NewEnhancedClassifier(inner, sampleRate, debug)
+	case "fusion":
+		// WHY nil: Fusion classifier needs the CED model path, which is
+		// resolved by the orchestrator. The orchestrator creates it directly
+		// via NewFusionClassifier.
+		return nil
 	case "whisper", "whisper+rhythm":
 		// WHY nil: Whisper classifier needs a WhisperClassifyFunc callback
 		// that wraps the transcriber. The orchestrator creates it directly

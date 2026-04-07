@@ -96,6 +96,48 @@ func defaultDownloadURL(ctx context.Context, url string) (*http.Response, error)
 	return http.DefaultClient.Do(req)
 }
 
+// --- CED-tiny model download ---
+
+// CEDModelURL is the download URL for the CED-tiny ONNX model (int8 quantized).
+// WHY placeholder: The model needs to be converted from PyTorch to ONNX first
+// (see ced.md for the conversion script). Once converted and hosted, update
+// this URL. The model is ~6MB int8 quantized.
+const CEDModelURL = "https://huggingface.co/TODO/ced-tiny-onnx/resolve/main/ced-tiny-int8.onnx"
+
+// CEDModelInfo returns the expected file path for the CED-tiny ONNX model.
+func CEDModelInfo(modelsDir string) string {
+	return filepath.Join(modelsDir, "ced-tiny.onnx")
+}
+
+// EnsureCEDModel checks if the CED model file exists and is non-zero size.
+func EnsureCEDModel(modelsDir string) (bool, string) {
+	filePath := CEDModelInfo(modelsDir)
+	info, err := os.Stat(filePath)
+	if err != nil || info.Size() == 0 {
+		return false, filePath
+	}
+	return true, filePath
+}
+
+// DownloadCEDModel downloads the CED-tiny ONNX model with progress reporting.
+func DownloadCEDModel(ctx context.Context, modelsDir string, progress DownloadProgress) (string, error) {
+	filePath := CEDModelInfo(modelsDir)
+
+	if err := os.MkdirAll(modelsDir, 0o755); err != nil {
+		return "", fmt.Errorf("create models directory: %w", err)
+	}
+
+	tmpPath := filePath + ".tmp"
+	success := false
+	defer func() {
+		if !success {
+			os.Remove(tmpPath)
+		}
+	}()
+
+	return filePath, downloadTo(ctx, CEDModelURL, filePath, tmpPath, progress, &success)
+}
+
 // --- Parakeet model download ---
 
 const parakeetHFBase = "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main"
