@@ -36,7 +36,7 @@ func DefaultConfig() Config {
 		ModelSize:      "base",
 		Language:       "en",
 		BufferSecs:     10,
-		ClassifierTier:    "whisper+rhythm",
+		ClassifierTier:    "fusion",
 		TranscriptionMode: "segment",
 		WindowSizeSecs:    10,
 		WindowStepSecs:    3,
