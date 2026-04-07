@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -84,9 +85,8 @@ func (w *WailsUI) ShowDownloadScreen(modelsDir, modelSize string) {
 	if w.ctx == nil {
 		return
 	}
-	wailsRuntime.EventsEmit(w.ctx, "screen", map[string]interface{}{
-		"screen":    "download",
-		"modelsDir": modelsDir,
+	log.Printf("wails-ui: emitting show-download (modelSize=%s)", modelSize)
+	wailsRuntime.EventsEmit(w.ctx, "show-download", map[string]interface{}{
 		"modelSize": modelSize,
 	})
 }
@@ -95,9 +95,8 @@ func (w *WailsUI) ShowMainScreen() {
 	if w.ctx == nil {
 		return
 	}
-	wailsRuntime.EventsEmit(w.ctx, "screen", map[string]interface{}{
-		"screen": "main",
-	})
+	log.Printf("wails-ui: emitting show-main")
+	wailsRuntime.EventsEmit(w.ctx, "show-main", nil)
 }
 
 func (w *WailsUI) UpdateDownloadProgress(downloaded, total int64) {

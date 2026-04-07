@@ -227,6 +227,21 @@ func (a *App) GetModelStatus() ModelStatus {
 	}
 	modelsDir := filepath.Join(appDir, "models")
 
+	// Check the appropriate model based on ASR engine setting.
+	if a.config != nil && a.config.ASREngine == "parakeet" {
+		exists, modelPath, _, err := transcriber.EnsureParakeetModel(modelsDir)
+		if err != nil {
+			return ModelStatus{Path: modelPath}
+		}
+		status := ModelStatus{Exists: exists, Path: modelPath}
+		if exists {
+			if info, err := os.Stat(modelPath); err == nil {
+				status.Size = formatBytes(info.Size())
+			}
+		}
+		return status
+	}
+
 	modelSize := "base"
 	if a.config != nil && a.config.ModelSize != "" {
 		modelSize = a.config.ModelSize

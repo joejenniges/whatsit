@@ -21,7 +21,22 @@
 
   onMount(() => {
     setupEvents();
+    checkModelStatus();
   });
+
+  async function checkModelStatus() {
+    try {
+      const { GetModelStatus, GetConfig } = await import('../wailsjs/go/main/App');
+      const cfg = await GetConfig();
+      const status = await GetModelStatus();
+      if (!status.Exists) {
+        currentView = 'download';
+        downloadModelSize = cfg.ASREngine === 'parakeet' ? 'parakeet-ctc-0.6b' : (cfg.ModelSize || 'base');
+      }
+    } catch {
+      // Bindings not available
+    }
+  }
 
   async function setupEvents() {
     try {
