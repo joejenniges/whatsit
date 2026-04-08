@@ -24,7 +24,8 @@ DIST_DIR := dist
 DLLS := libwhisper-1.dll ggml.dll ggml-base.dll ggml-cpu.dll ggml-vulkan.dll \
         ggml-blas.dll ggml-opencl.dll ggml-rpc.dll \
         libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll libgomp-1.dll \
-        libopenblas.dll onnxruntime.dll
+        libopenblas.dll libgfortran-5.dll libquadmath-0.dll \
+        onnxruntime.dll
 
 # Model files to bundle (CED-tiny for AI audio classification)
 MODELS := ced-tiny.onnx ced-tiny.onnx.data
