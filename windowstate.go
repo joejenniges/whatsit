@@ -39,12 +39,21 @@ func LoadWindowState() WindowState {
 		return defaults
 	}
 
-	// Sanity check: don't restore to tiny or offscreen positions
+	// Sanity check dimensions.
 	if state.Width < 400 {
 		state.Width = 900
 	}
 	if state.Height < 300 {
 		state.Height = 600
+	}
+
+	// Sanity check position. Reject positions that are clearly off-screen.
+	// A reasonable max is ~8000px (4x 4K monitors). Negative values beyond
+	// a small margin are also rejected (some window managers use small
+	// negative offsets for window chrome).
+	if state.X < -50 || state.X > 8000 || state.Y < -50 || state.Y > 4000 {
+		state.X = -1 // -1 means let the OS decide
+		state.Y = -1
 	}
 
 	return state

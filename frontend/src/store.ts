@@ -244,7 +244,13 @@ export async function init() {
     });
 
     EventsOn('download:progress', (data: any) => {
-      _download = { active: true, percent: data.percent || 0, message: data.message || '' };
+      const pct = data.percent || 0;
+      // If progress reaches 100%, treat as complete.
+      if (pct >= 1.0) {
+        _download = { active: false, percent: 100, message: '' };
+      } else {
+        _download = { active: true, percent: pct, message: data.message || '' };
+      }
       notify();
     });
 
@@ -252,6 +258,19 @@ export async function init() {
       _download = { active: false, percent: 100, message: '' };
       notify();
     });
+
+    // Belt-and-suspenders: if the download finished before we registered
+    // event listeners, re-check the state after a short delay.
+    setTimeout(async () => {
+      try {
+        const { GetInitialState } = await import('../wailsjs/go/main/App');
+        const state = await GetInitialState();
+        if (state && !state.Downloading && _download.active) {
+          _download = { active: false, percent: 100, message: '' };
+          notify();
+        }
+      } catch { /* ignore */ }
+    }, 3000);
 
     EventsOn('app:gpuWarning', (msg: string) => {
       _gpuWarning = msg;
