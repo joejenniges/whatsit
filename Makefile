@@ -19,12 +19,12 @@ test-whisper:
 	CGO_ENABLED=1 go test -tags whisper -v ./internal/transcriber/
 
 DIST_DIR := dist
-# Required DLLs. Excludes optional ggml backends (ggml-blas, ggml-opencl,
-# ggml-rpc) which require libopenblas.dll (42MB) or system OpenCL/Vulkan.
-# Whisper uses ggml-cpu (CPU) or ggml-vulkan (GPU) which are sufficient.
+# All DLLs needed for distribution. ggml.dll dynamically loads ALL ggml
+# backends at startup, so we must bundle them all plus their dependencies.
 DLLS := libwhisper-1.dll ggml.dll ggml-base.dll ggml-cpu.dll ggml-vulkan.dll \
+        ggml-blas.dll ggml-opencl.dll ggml-rpc.dll \
         libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll libgomp-1.dll \
-        onnxruntime.dll
+        libopenblas.dll onnxruntime.dll
 
 # Model files to bundle (CED-tiny for AI audio classification)
 MODELS := ced-tiny.onnx ced-tiny.onnx.data
